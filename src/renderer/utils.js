@@ -32,13 +32,77 @@ export function escapeHtml(s) {
 
 export async function prompt(message, defaultValue = '') {
   return new Promise(resolve => {
-    const value = window.prompt(message, defaultValue);
-    resolve(value);
+    const modal = el('#promptModal');
+    el('#promptTitle').textContent = message;
+    const input = el('#promptInput');
+    input.value = defaultValue;
+    input.placeholder = defaultValue;
+
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', handleOk);
+      cancelBtn.removeEventListener('click', handleCancel);
+      input.removeEventListener('keydown', handleKeydown);
+    };
+
+    const handleOk = () => {
+      cleanup();
+      resolve(input.value);
+    };
+
+    const handleCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const handleKeydown = (e) => {
+      if (e.key === 'Enter') handleOk();
+      if (e.key === 'Escape') handleCancel();
+    };
+
+    const okBtn = el('#promptOk');
+    const cancelBtn = el('#promptCancel');
+
+    modal.classList.remove('hidden');
+    input.focus();
+    input.select();
+
+    okBtn.addEventListener('click', handleOk);
+    cancelBtn.addEventListener('click', handleCancel);
+    input.addEventListener('keydown', handleKeydown);
   });
 }
 
 export async function confirmDialog(message) {
-  return window.confirm(message);
+  return new Promise(resolve => {
+    const modal = el('#confirmModal');
+    el('#confirmMessage').textContent = message;
+
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', handleOk);
+      cancelBtn.removeEventListener('click', handleCancel);
+    };
+
+    const handleOk = () => {
+      cleanup();
+      resolve(true);
+    };
+
+    const handleCancel = () => {
+      cleanup();
+      resolve(false);
+    };
+
+    const okBtn = el('#confirmOk');
+    const cancelBtn = el('#confirmCancel');
+
+    modal.classList.remove('hidden');
+    okBtn.focus();
+
+    okBtn.addEventListener('click', handleOk);
+    cancelBtn.addEventListener('click', handleCancel);
+  });
 }
 
 // 简单的事件总线

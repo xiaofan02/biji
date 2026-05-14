@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:; img-src 'self' data: blob: https: http:; connect-src 'self' https: http: ws: wss:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; connect-src 'self' https: http: ws: wss:;">
   <title>笔记 Biji - 本地知识库</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
@@ -300,6 +300,37 @@
 
   <!-- 右键菜单 -->
   <div class="context-menu hidden" id="contextMenu"></div>
+
+  <!-- 输入对话框 -->
+  <div class="modal hidden" id="promptModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content small">
+      <div class="modal-header">
+        <h3 id="promptTitle"></h3>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="promptInput" placeholder="" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="promptCancel">取消</button>
+        <button class="btn primary" id="promptOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 确认对话框 -->
+  <div class="modal hidden" id="confirmModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content small">
+      <div class="modal-body">
+        <p id="confirmMessage"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="confirmCancel">取消</button>
+        <button class="btn primary" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 提示 -->
   <div class="toast-container" id="toastContainer"></div>

@@ -810,6 +810,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .modal-content.large { width: 800px; }
+.modal-content.small { width: 400px; }
 
 .modal-header {
   display: flex;
@@ -827,6 +828,17 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   min-height: 400px;
 }
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.modal-content.small .modal-body { min-height: auto; padding: 16px; flex: none; }
+.modal-content.small .modal-body input { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-3); color: var(--text); }
 
 /* 设置 */
 .settings-tabs {

@@ -1,5 +1,5 @@
 // 笔记 / 文件树管理
-import { el, basename, dirname, toast, showContextMenu, confirmDialog, bus } from './utils.js';
+import { el, basename, dirname, toast, showContextMenu, confirmDialog, prompt, bus } from './utils.js';
 
 export class Notes {
   constructor() {
@@ -152,7 +152,7 @@ export class Notes {
   }
 
   async createNote(parentDir) {
-    const name = window.prompt('笔记名称(支持 .md / .py / .json / .yaml 等扩展名):', 'untitled.md');
+    const name = await prompt('笔记名称(支持 .md / .py / .json / .yaml 等扩展名):', 'untitled.md');
     if (!name) return;
     const fullPath = parentDir + '/' + name;
     try {
@@ -167,7 +167,7 @@ export class Notes {
   }
 
   async createFolder(parentDir) {
-    const name = window.prompt('文件夹名称:', 'new-folder');
+    const name = await prompt('文件夹名称:', 'new-folder');
     if (!name) return;
     try {
       await window.biji.fs.create(parentDir, name, true);
@@ -180,7 +180,7 @@ export class Notes {
   }
 
   async rename(node) {
-    const newName = window.prompt('新名称:', node.name);
+    const newName = await prompt('新名称:', node.name);
     if (!newName || newName === node.name) return;
     const newPath = dirname(node.path) + '/' + newName;
     try {
