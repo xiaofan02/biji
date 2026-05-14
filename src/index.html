@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:; img-src 'self' data: blob: https: http:; connect-src 'self' https: http: ws: wss:;">
+  <title>笔记 Biji - 本地知识库</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="../node_modules/highlight.js/styles/vs2015.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 标题栏 -->
+    <header class="titlebar">
+      <div class="brand">
+        <span class="logo">📓</span>
+        <span class="brand-name">笔记 Biji</span>
+        <span class="workspace-name" id="workspaceName"></span>
+      </div>
+      <div class="search-box">
+        <input type="text" id="globalSearch" placeholder="🔍 全局搜索 (Ctrl+P)" />
+        <div class="search-results" id="searchResults"></div>
+      </div>
+      <div class="actions">
+        <button class="icon-btn" id="btnNewNote" title="新建笔记 (Ctrl+N)">📝</button>
+        <button class="icon-btn" id="btnNewFolder" title="新建文件夹">📁</button>
+        <button class="icon-btn" id="btnSave" title="保存 (Ctrl+S)">💾</button>
+        <button class="icon-btn" id="btnAI" title="AI 助手 (Ctrl+I)">🤖</button>
+        <button class="icon-btn" id="btnTerminal" title="远程终端 (Ctrl+T)">⌨️</button>
+        <button class="icon-btn" id="btnPreview" title="切换预览 (Ctrl+Shift+P)">👁️</button>
+        <button class="icon-btn" id="btnSettings" title="设置">⚙️</button>
+      </div>
+    </header>
+
+    <!-- 主体 -->
+    <main class="main">
+      <!-- 左侧文件树 -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">资料库</span>
+          <button class="icon-btn small" id="btnRefresh" title="刷新">🔄</button>
+        </div>
+        <div class="file-tree" id="fileTree"></div>
+      </aside>
+
+      <div class="resizer" data-target="sidebar"></div>
+
+      <!-- 中间编辑区域 -->
+      <section class="editor-area">
+        <div class="tabs" id="tabs"></div>
+        <div class="editor-container">
+          <div class="editor-pane" id="editorPane">
+            <div class="empty-state" id="emptyState">
+              <div class="empty-logo">📓</div>
+              <h2>欢迎使用 笔记 Biji</h2>
+              <p>本地知识库 · Markdown · 代码 · AI · 远程终端</p>
+              <div class="empty-actions">
+                <button class="btn primary" id="emptyNewNote">📝 新建笔记</button>
+                <button class="btn" id="emptyOpenWs">📂 打开工作区</button>
+              </div>
+              <div class="shortcuts-hint">
+                <div><kbd>Ctrl</kbd>+<kbd>N</kbd> 新建笔记</div>
+                <div><kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</div>
+                <div><kbd>Ctrl</kbd>+<kbd>P</kbd> 搜索</div>
+                <div><kbd>Ctrl</kbd>+<kbd>I</kbd> AI 助手</div>
+                <div><kbd>Ctrl</kbd>+<kbd>T</kbd> 远程终端</div>
+                <div><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> 切换预览</div>
+              </div>
+            </div>
+            <div id="monacoContainer" class="monaco-container hidden"></div>
+          </div>
+          <div class="preview-resizer" data-target="preview"></div>
+          <div class="preview-pane hidden" id="previewPane">
+            <div class="preview-header">
+              <span>Markdown 预览</span>
+              <button class="icon-btn small" id="btnClosePreview">✕</button>
+            </div>
+            <div class="markdown-body" id="markdownBody"></div>
+          </div>
+        </div>
+        <div class="status-bar" id="statusBar">
+          <span id="statusFile">就绪</span>
+          <span id="statusLang"></span>
+          <span id="statusModified"></span>
+          <span class="spacer"></span>
+          <span id="statusLine"></span>
+          <span id="statusEncoding">UTF-8</span>
+        </div>
+      </section>
+
+      <!-- 右侧：AI / 终端面板 -->
+      <div class="right-resizer hidden" id="rightResizer"></div>
+      <aside class="right-panel hidden" id="rightPanel">
+        <div class="panel-tabs">
+          <button class="panel-tab active" data-panel="ai">🤖 AI 助手</button>
+          <button class="panel-tab" data-panel="terminal">⌨️ 远程终端</button>
+          <button class="icon-btn small panel-close" id="closeRightPanel">✕</button>
+        </div>
+
+        <!-- AI 面板 -->
+        <div class="panel-content active" data-panel="ai">
+          <div class="ai-provider-bar">
+            <select id="aiProviderSelect"></select>
+            <button class="icon-btn small" id="aiManageProviders" title="管理 AI 服务商">⚙️</button>
+            <button class="icon-btn small" id="aiClearChat" title="清空对话">🗑️</button>
+          </div>
+          <div class="ai-messages" id="aiMessages"></div>
+          <div class="ai-context-bar" id="aiContextBar">
+            <label><input type="checkbox" id="aiUseContext" checked> 包含当前笔记内容</label>
+            <label><input type="checkbox" id="aiStream" checked> 流式输出</label>
+          </div>
+          <div class="ai-input-area">
+            <textarea id="aiInput" placeholder="问我任何问题... (Ctrl+Enter 发送)"></textarea>
+            <button class="btn primary" id="aiSend">发送</button>
+          </div>
+        </div>
+
+        <!-- 终端面板 -->
+        <div class="panel-content" data-panel="terminal">
+          <div class="terminal-toolbar">
+            <select id="terminalSelect">
+              <option value="">— 选择会话 —</option>
+            </select>
+            <button class="icon-btn small" id="termNew" title="新建连接">➕</button>
+            <button class="icon-btn small" id="termManage" title="管理主机">📋</button>
+            <button class="icon-btn small" id="termClose" title="关闭当前">✕</button>
+          </div>
+          <div class="terminal-container" id="terminalContainer"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div class="modal hidden" id="settingsModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content large">
+      <div class="modal-header">
+        <h2>⚙️ 设置</h2>
+        <button class="icon-btn" id="closeSettings">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-tab="general">通用</button>
+          <button class="settings-tab" data-tab="ai">AI 大模型</button>
+          <button class="settings-tab" data-tab="ssh">SSH 主机</button>
+          <button class="settings-tab" data-tab="telnet">Telnet 主机</button>
+          <button class="settings-tab" data-tab="about">关于</button>
+        </div>
+
+        <div class="settings-content active" data-tab="general">
+          <div class="form-group">
+            <label>工作区路径</label>
+            <div class="row">
+              <input type="text" id="settingWorkspace" readonly />
+              <button class="btn" id="changeWorkspace">浏览…</button>
+            </div>
+            <small>所有笔记将存储在此目录下,可以直接用文件管理器访问</small>
+          </div>
+          <div class="form-group">
+            <label>主题</label>
+            <select id="settingTheme">
+              <option value="dark">深色</option>
+              <option value="light">浅色</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>编辑器字号</label>
+            <input type="number" id="settingFontSize" min="10" max="32" />
+          </div>
+        </div>
+
+        <div class="settings-content" data-tab="ai">
+          <div class="ai-providers-header">
+            <h3>AI 服务商</h3>
+            <button class="btn primary" id="aiAddProvider">➕ 添加</button>
+          </div>
+          <div class="ai-providers-list" id="aiProvidersList"></div>
+          <div class="ai-provider-editor hidden" id="aiProviderEditor">
+            <h4 id="aiProviderEditorTitle">编辑服务商</h4>
+            <div class="form-group">
+              <label>名称</label>
+              <input type="text" id="aipName" placeholder="例如:OpenAI GPT-4" />
+            </div>
+            <div class="form-group">
+              <label>类型</label>
+              <select id="aipType">
+                <option value="openai">OpenAI 兼容 (GPT、DeepSeek、Moonshot、智谱等)</option>
+                <option value="anthropic">Anthropic Claude</option>
+                <option value="ollama">Ollama 本地</option>
+                <option value="custom">自定义代理 (OpenAI 协议)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>API 地址 (Base URL)</label>
+              <input type="text" id="aipBaseUrl" placeholder="https://api.openai.com/v1" />
+              <small>
+                第三方代理填代理地址,例如:<br>
+                · OpenAI: <code>https://api.openai.com/v1</code><br>
+                · DeepSeek: <code>https://api.deepseek.com/v1</code><br>
+                · Moonshot: <code>https://api.moonshot.cn/v1</code><br>
+                · 智谱 GLM: <code>https://open.bigmodel.cn/api/paas/v4</code><br>
+                · Ollama: <code>http://localhost:11434</code><br>
+                · 自定义代理: 您的代理服务器地址
+              </small>
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" id="aipApiKey" placeholder="sk-..." />
+            </div>
+            <div class="form-group">
+              <label>模型名</label>
+              <input type="text" id="aipModel" placeholder="gpt-4o-mini / claude-sonnet-4-6 / llama3" />
+            </div>
+            <div class="form-group">
+              <label>温度 (0~2)</label>
+              <input type="number" id="aipTemp" min="0" max="2" step="0.1" value="0.7" />
+            </div>
+            <div class="row gap">
+              <button class="btn" id="aipTest">测试连接</button>
+              <button class="btn primary" id="aipSave">保存</button>
+              <button class="btn" id="aipCancel">取消</button>
+              <span id="aipTestResult"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-content" data-tab="ssh">
+          <div class="ai-providers-header">
+            <h3>SSH 远程主机</h3>
+            <button class="btn primary" id="sshAdd">➕ 添加</button>
+          </div>
+          <div class="ai-providers-list" id="sshList"></div>
+          <div class="ai-provider-editor hidden" id="sshEditor">
+            <h4>SSH 主机</h4>
+            <div class="form-group"><label>名称</label><input type="text" id="sshName" placeholder="生产服务器" /></div>
+            <div class="form-group"><label>主机 / IP</label><input type="text" id="sshHost" placeholder="192.168.1.10" /></div>
+            <div class="form-group"><label>端口</label><input type="number" id="sshPort" value="22" /></div>
+            <div class="form-group"><label>用户名</label><input type="text" id="sshUser" placeholder="root" /></div>
+            <div class="form-group">
+              <label>认证方式</label>
+              <select id="sshAuth">
+                <option value="password">密码</option>
+                <option value="key">私钥</option>
+              </select>
+            </div>
+            <div class="form-group" id="sshPasswordGroup">
+              <label>密码</label>
+              <input type="password" id="sshPassword" />
+            </div>
+            <div class="form-group hidden" id="sshKeyGroup">
+              <label>私钥文件</label>
+              <div class="row"><input type="text" id="sshKeyPath" readonly /><button class="btn" id="sshKeyBrowse">浏览…</button></div>
+              <label>Passphrase (可选)</label>
+              <input type="password" id="sshKeyPass" />
+            </div>
+            <div class="row gap">
+              <button class="btn primary" id="sshSave">保存</button>
+              <button class="btn" id="sshCancel">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-content" data-tab="telnet">
+          <div class="ai-providers-header">
+            <h3>Telnet 远程主机</h3>
+            <button class="btn primary" id="telnetAdd">➕ 添加</button>
+          </div>
+          <div class="ai-providers-list" id="telnetList"></div>
+          <div class="ai-provider-editor hidden" id="telnetEditor">
+            <h4>Telnet 主机</h4>
+            <div class="form-group"><label>名称</label><input type="text" id="telnetName" /></div>
+            <div class="form-group"><label>主机 / IP</label><input type="text" id="telnetHost" /></div>
+            <div class="form-group"><label>端口</label><input type="number" id="telnetPort" value="23" /></div>
+            <div class="row gap">
+              <button class="btn primary" id="telnetSave">保存</button>
+              <button class="btn" id="telnetCancel">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-content" data-tab="about">
+          <h3>笔记 Biji</h3>
+          <p>本地知识库 · 私有数据 · 全栈编辑</p>
+          <ul>
+            <li>✅ Markdown 编辑 + 实时预览</li>
+            <li>✅ Python / JavaScript / YAML / JSON / TOML / 等多语言语法高亮</li>
+            <li>✅ 本地 AI (Ollama) + 第三方代理 (OpenAI / Claude / DeepSeek / Moonshot / 智谱…)</li>
+            <li>✅ SSH 远程终端 (密码 / 私钥认证)</li>
+            <li>✅ Telnet 终端</li>
+            <li>✅ 全文搜索</li>
+            <li>✅ 跨平台 (Windows / macOS / Linux)</li>
+          </ul>
+          <p>所有数据本地存储,不上传任何云端。</p>
+          <p>版本:0.1.0</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右键菜单 -->
+  <div class="context-menu hidden" id="contextMenu"></div>
+
+  <!-- 提示 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- xterm 必须在 Monaco loader 之前加载,避免 AMD 检测冲突 -->
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+
+  <!-- Monaco loader -->
+  <script>
+    var require = { paths: { 'vs': '../node_modules/monaco-editor/min/vs' } };
+  </script>
+  <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
+
+  <!-- App scripts -->
+  <script type="module" src="renderer/app.js"></script>
+</body>
+</html>
