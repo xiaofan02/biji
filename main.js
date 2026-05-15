@@ -616,7 +616,7 @@ ipcMain.handle('telnet:connect', async (event, config) => {
     socket.on('data', (data) => {
       const processed = handleTelnetNegotiation(socket, data);
       if (processed.length) {
-        event.sender.send(`term:data:${id}`, processed.toString('binary'));
+        event.sender.send(`term:data:${id}`, processed.toString('utf-8'));
       }
     });
     socket.on('error', (err) => {
