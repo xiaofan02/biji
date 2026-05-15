@@ -545,9 +545,25 @@ ipcMain.handle('ssh:connect', async (event, config) => {
   return new Promise((resolve, reject) => {
     const id = `ssh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const client = new SSHClient();
-    client.on('ready', () => {
-      client.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (err, stream) => {
-        if (err) { reject(err); return; }
+    const termTypes = ['xterm-256color', 'vt100', 'linux'];
+    let termIdx = 0;
+
+    function tryShell() {
+      const termType = termTypes[termIdx];
+      const shellOpts = { cols: 80, rows: 24 };
+      if (termType) shellOpts.term = termType;
+
+      client.shell(shellOpts, (err, stream) => {
+        if (err) {
+          termIdx++;
+          if (termIdx < termTypes.length) {
+            tryShell();
+          } else {
+            reject(new Error(`无法创建 Shell: ${err.message}`));
+          }
+          return;
+        }
+
         sshSessions.set(id, { client, stream });
         stream.on('data', (data) => {
           event.sender.send(`term:data:${id}`, data.toString('utf-8'));
@@ -559,7 +575,9 @@ ipcMain.handle('ssh:connect', async (event, config) => {
         });
         resolve({ id });
       });
-    });
+    }
+
+    client.on('ready', tryShell);
     client.on('error', (err) => {
       event.sender.send(`term:error:${id}`, err.message);
       reject(err);
@@ -568,6 +586,7 @@ ipcMain.handle('ssh:connect', async (event, config) => {
       event.sender.send(`term:close:${id}`);
       sshSessions.delete(id);
     });
+
     const opts = {
       host: config.host,
       port: config.port || 22,
