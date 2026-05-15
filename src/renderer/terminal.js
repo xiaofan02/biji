@@ -162,19 +162,20 @@ export class TerminalManager {
     const off3 = window.biji.term.onError(id, (msg) => {
       term.writeln(`\r\n\x1b[31m[错误] ${msg}\x1b[0m`);
     });
-    session.cleanup = () => { off1(); off2(); off3(); };
 
-    term.onData((data) => {
+    const disposableData = term.onData((data) => {
       if (session.closed) return;
       if (type === 'ssh') window.biji.ssh.write(id, data);
       else if (type === 'telnet') window.biji.telnet.write(id, data);
     });
 
-    term.onResize(({ cols, rows }) => {
+    const disposableResize = term.onResize(({ cols, rows }) => {
       if (type === 'ssh' && !session.closed) {
         window.biji.ssh.resize(id, cols, rows);
       }
     });
+
+    session.cleanup = () => { off1(); off2(); off3(); disposableData?.dispose?.(); disposableResize?.dispose?.(); };
 
     const opt = document.createElement('option');
     opt.value = id;
