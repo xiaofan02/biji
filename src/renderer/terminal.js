@@ -175,7 +175,65 @@ export class TerminalManager {
       }
     });
 
-    session.cleanup = () => { off1(); off2(); off3(); disposableData?.dispose?.(); disposableResize?.dispose?.(); };
+    // 右键菜单 - 复制粘贴
+    div.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const selection = term.getSelection();
+      const items = [];
+
+      if (selection) {
+        items.push({
+          label: '📋 复制',
+          action: () => {
+            navigator.clipboard.writeText(selection).catch(() => {});
+          }
+        });
+      }
+
+      items.push({
+        label: '📌 粘贴',
+        action: async () => {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (type === 'ssh') window.biji.ssh.write(id, text);
+            else if (type === 'telnet') window.biji.telnet.write(id, text);
+          } catch (e) {}
+        }
+      });
+
+      if (items.length > 0) {
+        const rect = div.getBoundingClientRect();
+        showContextMenu(e.clientX, e.clientY, items);
+      }
+    });
+
+    // 快捷键支持
+    const keyHandler = (e) => {
+      // Ctrl+Shift+C - 复制
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyC') {
+        e.preventDefault();
+        const selection = term.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection).catch(() => {});
+        }
+      }
+      // Ctrl+Shift+V - 粘贴
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyV') {
+        e.preventDefault();
+        navigator.clipboard.readText().then(text => {
+          if (type === 'ssh') window.biji.ssh.write(id, text);
+          else if (type === 'telnet') window.biji.telnet.write(id, text);
+        }).catch(() => {});
+      }
+    };
+    div.addEventListener('keydown', keyHandler);
+
+    session.cleanup = () => {
+      off1(); off2(); off3();
+      disposableData?.dispose?.();
+      disposableResize?.dispose?.();
+      div.removeEventListener('keydown', keyHandler);
+    };
 
     const opt = document.createElement('option');
     opt.value = id;
