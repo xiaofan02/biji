@@ -41,9 +41,17 @@ class NetmikoAgent:
             self.connection = ConnectHandler(**device)
 
             print(json.dumps({"type": "debug", "msg": "Connected successfully"}), flush=True)
+
+            # Read initial prompt
+            import time
+            time.sleep(0.3)
+            output = self.connection.read_channel()
+            if output:
+                print(json.dumps({"type": "data", "data": output}), flush=True)
+
             print(json.dumps({"type": "connected"}), flush=True)
 
-            # Start reading thread to monitor connection
+            # Start keep-alive thread
             self._start_read_thread()
 
         except NetmikoAuthenticationException as e:
@@ -57,50 +65,40 @@ class NetmikoAgent:
             raise
 
     def _start_read_thread(self):
-        """Monitor connection and send prompts"""
+        """Monitor connection - keep it alive but don't spam reads"""
         import time
 
-        def read_loop():
-            try:
-                # Send initial newline to trigger prompt
-                self.connection.write_channel('\n')
-                time.sleep(0.5)
+        def keep_alive():
+            # Just keep the connection alive without aggressive reading
+            # The write() method will trigger reads when needed
+            while self.connection and self.connection.is_alive():
+                try:
+                    time.sleep(1)
+                except:
+                    break
+            print(json.dumps({"type": "closed"}), flush=True)
 
-                # Get initial prompt
-                output = self.connection.read_channel()
-                if output:
-                    print(json.dumps({"type": "data", "data": output}), flush=True)
-
-                # Keep connection alive and forward unsolicited output with polling
-                while self.connection.is_alive():
-                    try:
-                        # Use a longer sleep to reduce CPU usage and spam
-                        time.sleep(0.3)
-                        output = self.connection.read_channel()
-                        if output and output.strip():  # Only send non-empty output
-                            print(json.dumps({"type": "data", "data": output}), flush=True)
-                    except Exception as e:
-                        # Ignore read errors, connection might be idle
-                        time.sleep(0.5)
-                        continue
-
-            except Exception as e:
-                print(json.dumps({"type": "error", "msg": f"Read error: {str(e)}"}), flush=True)
-            finally:
-                print(json.dumps({"type": "closed"}), flush=True)
-
-        self.read_thread = threading.Thread(target=read_loop, daemon=True)
+        self.read_thread = threading.Thread(target=keep_alive, daemon=True)
         self.read_thread.start()
 
     def write(self, data):
-        """Send command to device"""
+        """Send command to device and read response"""
         if self.connection and self.connection.is_alive():
             try:
                 import time
                 self.connection.write_channel(data)
-                # Don't immediately read - let the read_loop handle it
-                # This prevents blocking and allows proper command execution
-                time.sleep(0.05)
+                # Wait for device to process
+                time.sleep(0.2)
+                # Read and send all available output
+                while True:
+                    try:
+                        output = self.connection.read_channel()
+                        if output:
+                            print(json.dumps({"type": "data", "data": output}), flush=True)
+                        else:
+                            break  # No more data
+                    except:
+                        break
             except Exception as e:
                 print(json.dumps({"type": "error", "msg": f"Write error: {str(e)}"}), flush=True)
 
