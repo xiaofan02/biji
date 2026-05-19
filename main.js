@@ -595,11 +595,9 @@ ipcMain.handle('ssh:connect', async (event, config) => {
       keepaliveInterval: 30000,
       algorithms: {
         kex: [
-          'diffie-hellman-group14-sha256',
-          'diffie-hellman-group14-sha1',
-          'diffie-hellman-group1-sha1',
+          'curve25519-sha256',
+          'curve25519-sha256@libssh.org',
           'diffie-hellman-group-exchange-sha256',
-          'diffie-hellman-group-exchange-sha1',
           'ecdh-sha2-nistp256',
           'ecdh-sha2-nistp384',
           'ecdh-sha2-nistp521'
@@ -612,17 +610,20 @@ ipcMain.handle('ssh:connect', async (event, config) => {
           'aes256-gcm@openssh.com',
           'aes128-cbc',
           'aes192-cbc',
-          'aes256-cbc',
-          '3des-cbc'
+          'aes256-cbc'
         ],
         serverHostKey: [
-          'ssh-rsa',
+          'ssh-ed25519',
+          'ecdsa-sha2-nistp256',
+          'ecdsa-sha2-nistp384',
+          'ecdsa-sha2-nistp521',
           'rsa-sha2-512',
           'rsa-sha2-256',
-          'ecdsa-sha2-nistp256',
-          'ssh-ed25519'
+          'ssh-rsa'
         ],
         hmac: [
+          'hmac-sha2-256-etm@openssh.com',
+          'hmac-sha2-512-etm@openssh.com',
           'hmac-sha2-256',
           'hmac-sha2-512',
           'hmac-sha1'
