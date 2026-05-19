@@ -553,6 +553,7 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
   console.log(`[SSH] Connecting to ${config.host}:${config.port || 22} with ${sshCmd}`);
 
   const args = [
+    '-tt',  // Force PTY allocation
     '-v',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
@@ -600,19 +601,17 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
       console.log('[SSH] Password prompt detected, sending password');
       proc.stdin.write(config.password + '\n');
       passwordSent = true;
-      dataBuffer = '';
     }
 
-    // Resolve on first substantial data
-    if (!resolved && text.trim().length > 0) {
-      // Wait a bit to see if more data comes
-      setTimeout(() => {
-        if (!resolved && dataBuffer.trim().length > 0) {
-          console.log('[SSH] Received data, resolving connection');
-          resolved = true;
-          resolve({ id });
-        }
-      }, 500);
+    // Resolve on first shell prompt or substantial data after password
+    if (!resolved && passwordSent && (
+      /[$#>~][\s\n]*$/.test(text) ||  // Shell prompts
+      text.includes('\n') ||           // Any newline data after password
+      dataBuffer.length > 100          // Or enough data accumulated
+    )) {
+      console.log('[SSH] Shell detected, resolving connection');
+      resolved = true;
+      resolve({ id });
     }
   };
 
