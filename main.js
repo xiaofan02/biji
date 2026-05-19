@@ -544,138 +544,144 @@ ipcMain.handle('ai:test', async (_e, provider) => {
 ipcMain.handle('ssh:connect', async (event, config) => {
   return new Promise((resolve, reject) => {
     const id = `ssh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    tryPythonSSH(id, config, event, resolve, reject);
+    tryOpenSSHDirect(id, config, event, resolve, reject);
   });
 });
 
-function tryPythonSSH(id, config, event, resolve, reject) {
-  console.log(`[SSH] Starting Python agent for ${config.host}:${config.port || 22}`);
+function tryOpenSSHDirect(id, config, event, resolve, reject) {
+  const sshCmd = process.platform === 'win32' ? 'ssh.exe' : 'ssh';
+  console.log(`[SSH] Connecting to ${config.host}:${config.port || 22} with ${sshCmd}`);
 
-  const pythonScript = path.join(__dirname, 'ssh_agent.py');
-  let pythonCmd = 'python3';
+  const args = [
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'PasswordAuthentication=yes',
+    '-o', 'PubkeyAuthentication=yes',
+    '-o', 'PreferredAuthentications=password,publickey',
+    '-o', 'ConnectTimeout=15',
+    '-o', 'KexAlgorithms=+diffie-hellman-group1-sha1',
+    '-o', 'HostKeyAlgorithms=+ssh-rsa',
+    '-o', 'PubkeyAcceptedAlgorithms=+ssh-rsa',
+    '-o', 'Ciphers=+3des-cbc,+aes128-cbc',
+    '-o', 'MACs=+hmac-sha1',
+    '-p', String(config.port || 22)
+  ];
 
-  // On Windows, try python first
-  if (process.platform === 'win32') {
-    pythonCmd = 'python';
-  }
+  args.push(`${config.username}@${config.host}`);
 
-  const proc = spawn(pythonCmd, [pythonScript], {
+  const proc = spawn(sshCmd, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false
   });
 
+  console.log(`[SSH] Process spawned with PID ${proc.pid}`);
+  sshSessions.set(id, { process: proc, stdin: proc.stdin, type: 'openssh-spawn' });
+
   let resolved = false;
+  let passwordSent = false;
   let buffer = '';
+  let commandReady = false;
 
-  const handleOutput = (data) => {
-    const lines = data.toString('utf-8').split('\n');
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const msg = JSON.parse(line);
-        console.log(`[SSH] Agent message:`, msg.type);
+  const sendData = (data) => {
+    event.sender.send(`term:data:${id}`, data);
+  };
 
-        if (msg.type === 'connected') {
-          console.log(`[SSH] Connection established for ${id}`);
-          if (!resolved) {
-            resolved = true;
-            resolve({ id });
-          }
-        } else if (msg.type === 'data') {
-          event.sender.send(`term:data:${id}`, msg.data);
-        } else if (msg.type === 'closed') {
-          console.log(`[SSH] Connection closed for ${id}`);
-          event.sender.send(`term:close:${id}`);
-          sshSessions.delete(id);
-        } else if (msg.type === 'error') {
-          console.log(`[SSH] Agent error: ${msg.msg}`);
-          event.sender.send(`term:error:${id}`, msg.msg);
-          if (!resolved) {
-            resolved = true;
-            reject(new Error(msg.msg));
-          }
-        } else if (msg.type === 'debug') {
-          console.log(`[SSH] Debug: ${msg.msg}`);
-        }
-      } catch (e) {
-        if (line.trim()) console.log(`[SSH] Non-JSON output:`, line.slice(0, 100));
+  const onStdout = (data) => {
+    const text = data.toString('utf-8');
+    buffer += text;
+    sendData(text);
+
+    console.log(`[SSH] stdout (${text.length} bytes):`, text.slice(0, 80).replace(/\n/g, '\\n'));
+
+    // Look for password prompt
+    if (!passwordSent && config.password && /[Pp]assword[:\s]|[Pp]assphrase/i.test(buffer)) {
+      console.log('[SSH] Password prompt detected, sending password');
+      proc.stdin.write(config.password + '\n');
+      passwordSent = true;
+      buffer = '';
+    }
+
+    // Check for shell prompt ($ # > or other indicators)
+    if (!commandReady && /[$#>\s]$/.test(buffer.trim())) {
+      console.log('[SSH] Shell prompt detected');
+      commandReady = true;
+      if (!resolved) {
+        resolved = true;
+        console.log('[SSH] Connection established');
+        resolve({ id });
       }
     }
   };
 
-  proc.stdout.on('data', handleOutput);
-  proc.stderr.on('data', (data) => {
-    console.log(`[SSH] Stderr:`, data.toString('utf-8').slice(0, 100));
+  const onStderr = (data) => {
+    const text = data.toString('utf-8');
+    console.log(`[SSH] stderr:`, text.slice(0, 100));
+    sendData(text);
+  };
+
+  proc.stdout.on('data', onStdout);
+  proc.stderr.on('data', onStderr);
+
+  // Fallback resolve after first data received
+  let firstDataReceived = false;
+  const originalOnStdout = onStdout;
+  proc.stdout.on('data', (data) => {
+    originalOnStdout(data);
+    if (!firstDataReceived && !resolved) {
+      firstDataReceived = true;
+      setTimeout(() => {
+        if (!resolved) {
+          console.log('[SSH] Resolving on first data (no prompt detection)');
+          resolved = true;
+          resolve({ id });
+        }
+      }, 1000);
+    }
   });
 
   proc.on('error', (err) => {
-    console.log(`[SSH] Process error:`, err.message);
+    console.log(`[SSH] Process error: ${err.message}`);
     if (!resolved) {
       resolved = true;
       reject(err);
     }
   });
 
-  proc.on('exit', (code) => {
-    console.log(`[SSH] Agent process exited with code ${code}`);
+  proc.on('exit', (code, signal) => {
+    console.log(`[SSH] Process exited with code ${code}`);
     event.sender.send(`term:close:${id}`);
     sshSessions.delete(id);
   });
 
-  // Store session
-  sshSessions.set(id, { process: proc, type: 'python' });
-
-  // Send connect command to Python agent
-  const connectCmd = {
-    type: 'connect',
-    host: config.host,
-    port: config.port || 22,
-    username: config.username,
-    password: config.password || undefined,
-    privateKeyPath: config.privateKeyPath || undefined,
-    passphrase: config.passphrase || undefined
-  };
-
-  proc.stdin.write(JSON.stringify(connectCmd) + '\n');
-
   // Timeout
   const timeout = setTimeout(() => {
     if (!resolved) {
-      console.log(`[SSH] Connection timeout for ${id}`);
+      console.log('[SSH] Connection timeout');
       resolved = true;
       reject(new Error('SSH connection timeout'));
       proc.kill();
     }
   }, 20000);
 
-  // Clean up timeout on success/failure
-  const cleanup = () => clearTimeout(timeout);
+  // Ensure timeout is cleared
   const origResolve = resolve;
   const origReject = reject;
-
-  resolve = (val) => { cleanup(); origResolve(val); };
-  reject = (err) => { cleanup(); origReject(err); };
+  resolve = (val) => { clearTimeout(timeout); origResolve(val); };
+  reject = (err) => { clearTimeout(timeout); origReject(err); };
 }
 
 ipcMain.handle('ssh:write', (_e, id, data) => {
   const s = sshSessions.get(id);
   if (!s) return false;
 
-  if (s.type === 'python') {
-    const cmd = { type: 'write', data };
-    s.process.stdin.write(JSON.stringify(cmd) + '\n');
+  if (s.type === 'openssh-spawn') {
+    s.stdin.write(data);
   }
   return true;
 });
 
 ipcMain.handle('ssh:resize', (_e, id, cols, rows) => {
-  const s = sshSessions.get(id);
-  if (!s) return false;
-
-  if (s.type === 'python') {
-    const cmd = { type: 'resize', cols, rows };
-    s.process.stdin.write(JSON.stringify(cmd) + '\n');
-  }
+  // OpenSSH spawned without PTY doesn't support resize
   return true;
 });
 
@@ -683,9 +689,8 @@ ipcMain.handle('ssh:close', (_e, id) => {
   const s = sshSessions.get(id);
   if (!s) return false;
 
-  if (s.type === 'python') {
-    const cmd = { type: 'close' };
-    s.process.stdin.write(JSON.stringify(cmd) + '\n');
+  if (s.type === 'openssh-spawn') {
+    s.stdin.end();
     s.process.kill();
   }
   sshSessions.delete(id);
