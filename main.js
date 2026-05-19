@@ -631,11 +631,9 @@ Host ${config.host}
 
   fsp.mkdir(sshDir, { recursive: true })
     .then(() => {
-      // Read existing config or create empty
       return fsp.readFile(sshConfigPath, 'utf-8').catch(() => '');
     })
     .then(existingConfig => {
-      // Check if config already has this host
       if (!existingConfig.includes(`Host ${config.host}`)) {
         return fsp.appendFile(sshConfigPath, configEntry, 'utf-8');
       }
@@ -645,21 +643,27 @@ Host ${config.host}
   const sshCmd = process.platform === 'win32' ? 'ssh.exe' : 'ssh';
   console.log(`Attempting OpenSSH fallback with ${sshCmd}`);
 
+  // Build arguments
   const args = [
-    '-v',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
-    '-o', 'PreferredAuthentications=password,keyboard-interactive',
-    '-p', String(config.port || 22),
-    `${config.username}@${config.host}`
+    '-o', 'NumberOfPasswordPrompts=1'
   ];
+
+  // If password is provided, use -o BatchMode=no to allow password auth
+  if (config.password) {
+    args.push('-o', 'BatchMode=no');
+    args.push('-o', 'PasswordAuthentication=yes');
+  }
+
+  args.push('-p', String(config.port || 22));
+  args.push(`${config.username}@${config.host}`);
 
   try {
     const proc = spawn(sshCmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
-      timeout: 30000,
-      env: { ...process.env, DISPLAY: '' }
+      timeout: 30000
     });
 
     proc.on('error', (err) => {
@@ -675,19 +679,27 @@ Host ${config.host}
     console.log(`OpenSSH process spawned with PID ${proc.pid}`);
     sshSessions.set(id, { process: proc, type: 'openssh' });
 
-    let outputBuffer = '';
+    let waitingForPassword = !!config.password;
+    let passwordSent = false;
+
     proc.stdout.on('data', (data) => {
       const str = data.toString('utf-8');
       console.log('OpenSSH stdout:', str.slice(0, 100));
-      outputBuffer += str;
       event.sender.send(`term:data:${id}`, str);
+
+      // Check for password prompt
+      if (waitingForPassword && !passwordSent && str.includes('Password:')) {
+        console.log('Password prompt detected, sending password');
+        proc.stdin.write(config.password + '\n');
+        passwordSent = true;
+      }
     });
 
     proc.stderr.on('data', (data) => {
       const str = data.toString('utf-8');
       console.log('OpenSSH stderr:', str.slice(0, 100));
-      // Don't send verbose output to terminal, only actual content
-      if (!str.includes('debug') && !str.includes('Pseudo-terminal')) {
+      // Send important error messages
+      if (str.includes('Password') || str.includes('authentication') || str.includes('denied')) {
         event.sender.send(`term:data:${id}`, str);
       }
     });
@@ -698,12 +710,16 @@ Host ${config.host}
       sshSessions.delete(id);
     });
 
-    // Handle password if provided
+    // For non-interactive password input, send immediately
     if (config.password) {
+      // Try sending password with a delay
       setTimeout(() => {
-        console.log('Sending password to OpenSSH');
-        proc.stdin.write(config.password + '\n');
-      }, 1000);
+        if (!passwordSent) {
+          console.log('Sending password to OpenSSH (timeout trigger)');
+          proc.stdin.write(config.password + '\n');
+          passwordSent = true;
+        }
+      }, 2000);
     }
 
     resolve({ id });
