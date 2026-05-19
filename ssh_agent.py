@@ -32,7 +32,6 @@ class NetmikoAgent:
                 'secret': '',
                 'timeout': 20,
                 'conn_timeout': 20,
-                'read_timeout': 20,
                 'global_delay_factor': 1,
                 'use_keys': bool(private_key_path),
                 'key_file': private_key_path,
