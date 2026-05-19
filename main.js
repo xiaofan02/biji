@@ -553,6 +553,7 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
   console.log(`[SSH] Connecting to ${config.host}:${config.port || 22} with ${sshCmd}`);
 
   const args = [
+    '-v',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
     '-o', 'PasswordAuthentication=yes',
@@ -571,73 +572,52 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
 
   const proc = spawn(sshCmd, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    shell: false
+    shell: false,
+    windowsVerbatimArguments: true
   });
 
   console.log(`[SSH] Process spawned with PID ${proc.pid}`);
-  sshSessions.set(id, { process: proc, stdin: proc.stdin, type: 'openssh-spawn' });
+  sshSessions.set(id, { process: proc, stdin: proc.stdin, stdout: proc.stdout, stderr: proc.stderr, type: 'openssh-spawn' });
 
   let resolved = false;
   let passwordSent = false;
-  let buffer = '';
-  let commandReady = false;
+  let dataBuffer = '';
 
   const sendData = (data) => {
     event.sender.send(`term:data:${id}`, data);
   };
 
-  const onStdout = (data) => {
+  // Combined stdout and stderr
+  const handleData = (data, source) => {
     const text = data.toString('utf-8');
-    buffer += text;
+    dataBuffer += text;
     sendData(text);
 
-    console.log(`[SSH] stdout (${text.length} bytes):`, text.slice(0, 80).replace(/\n/g, '\\n'));
+    console.log(`[SSH] ${source} (${text.length} bytes):`, text.slice(0, 100).replace(/\n/g, '\\n'));
 
     // Look for password prompt
-    if (!passwordSent && config.password && /[Pp]assword[:\s]|[Pp]assphrase/i.test(buffer)) {
+    if (!passwordSent && config.password && /[Pp]assword[:\s]|[Pp]assphrase/i.test(text)) {
       console.log('[SSH] Password prompt detected, sending password');
       proc.stdin.write(config.password + '\n');
       passwordSent = true;
-      buffer = '';
+      dataBuffer = '';
     }
 
-    // Check for shell prompt ($ # > or other indicators)
-    if (!commandReady && /[$#>\s]$/.test(buffer.trim())) {
-      console.log('[SSH] Shell prompt detected');
-      commandReady = true;
-      if (!resolved) {
-        resolved = true;
-        console.log('[SSH] Connection established');
-        resolve({ id });
-      }
-    }
-  };
-
-  const onStderr = (data) => {
-    const text = data.toString('utf-8');
-    console.log(`[SSH] stderr:`, text.slice(0, 100));
-    sendData(text);
-  };
-
-  proc.stdout.on('data', onStdout);
-  proc.stderr.on('data', onStderr);
-
-  // Fallback resolve after first data received
-  let firstDataReceived = false;
-  const originalOnStdout = onStdout;
-  proc.stdout.on('data', (data) => {
-    originalOnStdout(data);
-    if (!firstDataReceived && !resolved) {
-      firstDataReceived = true;
+    // Resolve on first substantial data
+    if (!resolved && text.trim().length > 0) {
+      // Wait a bit to see if more data comes
       setTimeout(() => {
-        if (!resolved) {
-          console.log('[SSH] Resolving on first data (no prompt detection)');
+        if (!resolved && dataBuffer.trim().length > 0) {
+          console.log('[SSH] Received data, resolving connection');
           resolved = true;
           resolve({ id });
         }
-      }, 1000);
+      }, 500);
     }
-  });
+  };
+
+  proc.stdout.on('data', (data) => handleData(data, 'stdout'));
+  proc.stderr.on('data', (data) => handleData(data, 'stderr'));
 
   proc.on('error', (err) => {
     console.log(`[SSH] Process error: ${err.message}`);
@@ -648,20 +628,20 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
   });
 
   proc.on('exit', (code, signal) => {
-    console.log(`[SSH] Process exited with code ${code}`);
+    console.log(`[SSH] Process exited with code ${code}, signal ${signal}`);
     event.sender.send(`term:close:${id}`);
     sshSessions.delete(id);
   });
 
-  // Timeout
+  // Timeout - longer now
   const timeout = setTimeout(() => {
     if (!resolved) {
-      console.log('[SSH] Connection timeout');
+      console.log(`[SSH] Connection timeout (received ${dataBuffer.length} bytes of data)`);
       resolved = true;
       reject(new Error('SSH connection timeout'));
       proc.kill();
     }
-  }, 20000);
+  }, 30000);
 
   // Ensure timeout is cleared
   const origResolve = resolve;
