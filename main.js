@@ -615,10 +615,38 @@ function trySSH2(id, config, event, resolve, reject) {
 }
 
 function tryOpenSSH(id, config, event, resolve, reject) {
+  // First, create SSH config to enable old algorithms for this host
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  const sshConfigPath = path.join(homeDir, '.ssh', 'config');
+  const sshDir = path.dirname(sshConfigPath);
+
+  const configEntry = `
+Host ${config.host}
+    KexAlgorithms +diffie-hellman-group1-sha1
+    HostKeyAlgorithms +ssh-rsa
+    PubkeyAcceptedAlgorithms +ssh-rsa
+    Ciphers +3des-cbc,aes128-cbc
+    MACs +hmac-sha1
+`;
+
+  fsp.mkdir(sshDir, { recursive: true })
+    .then(() => {
+      // Read existing config or create empty
+      return fsp.readFile(sshConfigPath, 'utf-8').catch(() => '');
+    })
+    .then(existingConfig => {
+      // Check if config already has this host
+      if (!existingConfig.includes(`Host ${config.host}`)) {
+        return fsp.appendFile(sshConfigPath, configEntry, 'utf-8');
+      }
+    })
+    .catch(err => console.log('SSH config setup warning:', err.message));
+
   const sshCmd = process.platform === 'win32' ? 'ssh.exe' : 'ssh';
   console.log(`Attempting OpenSSH fallback with ${sshCmd}`);
 
   const args = [
+    '-v',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
     '-o', 'PreferredAuthentications=password,keyboard-interactive',
@@ -630,7 +658,8 @@ function tryOpenSSH(id, config, event, resolve, reject) {
     const proc = spawn(sshCmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
-      timeout: 30000
+      timeout: 30000,
+      env: { ...process.env, DISPLAY: '' }
     });
 
     proc.on('error', (err) => {
@@ -646,14 +675,21 @@ function tryOpenSSH(id, config, event, resolve, reject) {
     console.log(`OpenSSH process spawned with PID ${proc.pid}`);
     sshSessions.set(id, { process: proc, type: 'openssh' });
 
+    let outputBuffer = '';
     proc.stdout.on('data', (data) => {
-      console.log('OpenSSH stdout:', data.toString('utf-8').slice(0, 100));
-      event.sender.send(`term:data:${id}`, data.toString('utf-8'));
+      const str = data.toString('utf-8');
+      console.log('OpenSSH stdout:', str.slice(0, 100));
+      outputBuffer += str;
+      event.sender.send(`term:data:${id}`, str);
     });
 
     proc.stderr.on('data', (data) => {
-      console.log('OpenSSH stderr:', data.toString('utf-8').slice(0, 100));
-      event.sender.send(`term:data:${id}`, data.toString('utf-8'));
+      const str = data.toString('utf-8');
+      console.log('OpenSSH stderr:', str.slice(0, 100));
+      // Don't send verbose output to terminal, only actual content
+      if (!str.includes('debug') && !str.includes('Pseudo-terminal')) {
+        event.sender.send(`term:data:${id}`, str);
+      }
     });
 
     proc.on('close', (code) => {
@@ -662,12 +698,12 @@ function tryOpenSSH(id, config, event, resolve, reject) {
       sshSessions.delete(id);
     });
 
-    // Handle password if provided (send immediately after connection)
+    // Handle password if provided
     if (config.password) {
       setTimeout(() => {
         console.log('Sending password to OpenSSH');
         proc.stdin.write(config.password + '\n');
-      }, 500);
+      }, 1000);
     }
 
     resolve({ id });
