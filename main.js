@@ -570,11 +570,22 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
 
   args.push(`${config.username}@${config.host}`);
 
-  const proc = spawn(sshCmd, args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    shell: false,
-    windowsVerbatimArguments: true
-  });
+  // On Windows, use PowerShell to start SSH for better PTY support
+  let proc;
+  if (process.platform === 'win32') {
+    // Use PowerShell to wrap SSH
+    const psCommand = `ssh ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`;
+    console.log(`[SSH] Using PowerShell wrapper for better PTY support`);
+    proc = spawn('powershell.exe', ['-NoProfile', '-Command', psCommand], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false
+    });
+  } else {
+    proc = spawn(sshCmd, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false
+    });
+  }
 
   console.log(`[SSH] Process spawned with PID ${proc.pid}`);
   sshSessions.set(id, { process: proc, stdin: proc.stdin, stdout: proc.stdout, stderr: proc.stderr, type: 'openssh-spawn' });
@@ -582,7 +593,7 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
   let resolved = false;
   let passwordSent = false;
   let dataBuffer = '';
-  let shellInitialized = false;
+  let firstDataTime = 0;
 
   const sendData = (data) => {
     event.sender.send(`term:data:${id}`, data);
@@ -601,21 +612,24 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
       console.log('[SSH] Password prompt detected, sending password');
       proc.stdin.write(config.password + '\n');
       passwordSent = true;
+      return;
     }
 
     // Resolve on first data received (connection is working)
     if (!resolved && dataBuffer.length > 0) {
       console.log('[SSH] Data received, resolving connection');
       resolved = true;
+      firstDataTime = Date.now();
 
-      // Wait a bit for shell to initialize, then send Enter to wake it up
+      // Wait for shell to initialize, then try to activate it
       setTimeout(() => {
-        if (!shellInitialized) {
-          console.log('[SSH] Sending Enter to initialize shell');
+        console.log('[SSH] Initializing shell with Enter key');
+        proc.stdin.write('\n');
+        // Send another Enter after a short delay
+        setTimeout(() => {
           proc.stdin.write('\n');
-          shellInitialized = true;
-        }
-      }, 300);
+        }, 200);
+      }, 500);
 
       resolve({ id });
     }
@@ -638,7 +652,7 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
     sshSessions.delete(id);
   });
 
-  // Timeout - longer now
+  // Timeout
   const timeout = setTimeout(() => {
     if (!resolved) {
       console.log(`[SSH] Connection timeout (received ${dataBuffer.length} bytes of data)`);
