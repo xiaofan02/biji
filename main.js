@@ -602,13 +602,9 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
       passwordSent = true;
     }
 
-    // Resolve on first shell prompt or substantial data after password
-    if (!resolved && passwordSent && (
-      /[$#>~][\s\n]*$/.test(text) ||  // Shell prompts
-      text.includes('\n') ||           // Any newline data after password
-      dataBuffer.length > 100          // Or enough data accumulated
-    )) {
-      console.log('[SSH] Shell detected, resolving connection');
+    // Resolve on first data received (connection is working)
+    if (!resolved && dataBuffer.length > 0) {
+      console.log('[SSH] Data received, resolving connection immediately');
       resolved = true;
       resolve({ id });
     }
