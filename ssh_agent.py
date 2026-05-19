@@ -23,34 +23,6 @@ class SSHAgent:
             self.client = paramiko.SSHClient()
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            # Configure to support old algorithms
-            transport = paramiko.Transport((host, int(port)))
-
-            # Set algorithms to support old/legacy SSH servers
-            transport.get_security_options().kex = [
-                'diffie-hellman-group1-sha1',
-                'diffie-hellman-group14-sha1',
-                'ecdh-sha2-nistp256',
-                'ecdh-sha2-nistp384',
-                'ecdh-sha2-nistp521'
-            ]
-            transport.get_security_options().key_types = [
-                'ssh-rsa',
-                'rsa-sha2-256',
-                'rsa-sha2-512'
-            ]
-            transport.get_security_options().ciphers = [
-                '3des-cbc',
-                'aes128-cbc',
-                'aes128-ctr',
-                'aes256-cbc',
-                'aes256-ctr'
-            ]
-            transport.get_security_options().digests = [
-                'hmac-sha1',
-                'hmac-sha2-256'
-            ]
-
             print(json.dumps({"type": "debug", "msg": f"Connecting to {username}@{host}:{port}"}), flush=True)
 
             # Prepare key
@@ -70,19 +42,24 @@ class SSHAgent:
                     except:
                         pass
 
-            # Connect
+            # Connect with algorithm preferences
+            # Use look_for_keys=False to avoid delays with SSH key lookups
             self.client.connect(
                 hostname=host,
                 port=int(port),
                 username=username,
                 password=password,
                 pkey=pkey,
-                look_for_keys=True,
-                allow_agent=True,
-                timeout=15
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=15,
+                # Disable security options check to allow old algorithms
+                disabled_algorithms={'pubkeys': [], 'keys': []}
             )
 
-            # Request PTY
+            print(json.dumps({"type": "debug", "msg": f"Connected, requesting shell"}), flush=True)
+
+            # Request PTY shell
             self.channel = self.client.invoke_shell(
                 term='xterm-256color',
                 width=80,
