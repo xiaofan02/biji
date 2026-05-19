@@ -1,123 +1,123 @@
 #!/usr/bin/env python3
 """
-SSH Agent for Biji - Handles SSH connections via netmiko
-Optimized for network devices (Cisco, Juniper, etc.)
-Communicates with Electron main process via stdin/stdout
+SSH Agent for Biji - Handles SSH connections via paramiko
+Direct shell interaction with proper PTY support
 """
 import sys
 import json
+import paramiko
+import socket
 import threading
-from netmiko import ConnectHandler
-from netmiko.exceptions import (
-    NetmikoAuthenticationException,
-    NetmikoTimeoutException,
-)
+import time
 
-class NetmikoAgent:
+class SSHAgent:
     def __init__(self):
-        self.connection = None
-        self.read_thread = None
+        self.client = None
+        self.channel = None
 
-    def connect(self, host, port, username, password=None, private_key_path=None, passphrase=None, device_type='cisco_ios'):
-        """Connect to network device using netmiko"""
+    def connect(self, host, port, username, password=None, private_key_path=None, passphrase=None):
+        """Connect to SSH server and request shell"""
         try:
-            print(json.dumps({"type": "debug", "msg": f"Connecting to {username}@{host}:{port} (netmiko)"}), flush=True)
+            print(json.dumps({"type": "debug", "msg": f"Connecting to {username}@{host}:{port}"}), flush=True)
 
-            device = {
-                'device_type': device_type,
-                'host': host,
-                'port': int(port),
-                'username': username,
-                'password': password or '',
-                'secret': '',
-                'timeout': 20,
-                'conn_timeout': 20,
-                'global_delay_factor': 1,
-                'use_keys': bool(private_key_path),
-                'key_file': private_key_path,
-                'passphrase': passphrase,
-            }
+            self.client = paramiko.SSHClient()
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            self.connection = ConnectHandler(**device)
+            # Prepare key
+            pkey = None
+            if private_key_path:
+                try:
+                    if passphrase:
+                        pkey = paramiko.RSAKey.from_private_key_file(private_key_path, password=passphrase)
+                    else:
+                        pkey = paramiko.RSAKey.from_private_key_file(private_key_path)
+                except:
+                    try:
+                        if passphrase:
+                            pkey = paramiko.Ed25519Key.from_private_key_file(private_key_path, password=passphrase)
+                        else:
+                            pkey = paramiko.Ed25519Key.from_private_key_file(private_key_path)
+                    except:
+                        pass
 
-            print(json.dumps({"type": "debug", "msg": "Connected successfully"}), flush=True)
+            # Connect
+            self.client.connect(
+                hostname=host,
+                port=int(port),
+                username=username,
+                password=password,
+                pkey=pkey,
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=15,
+                disabled_algorithms={'pubkeys': [], 'keys': []}
+            )
 
-            # Initialize shell by sending newline and reading response
-            import time
-            self.connection.write_channel('\n')
-            time.sleep(0.5)
+            print(json.dumps({"type": "debug", "msg": "Connected, requesting shell"}), flush=True)
 
-            # Read initial output/prompt
-            try:
-                output = self.connection.read_channel()
-                if output:
-                    print(json.dumps({"type": "data", "data": output}), flush=True)
-            except:
-                pass
+            # Request interactive shell
+            self.channel = self.client.invoke_shell(term='xterm-256color', width=120, height=30)
+            self.channel.settimeout(0.0)  # Non-blocking
 
             print(json.dumps({"type": "connected"}), flush=True)
 
-            # Start keep-alive thread
+            # Start read thread
             self._start_read_thread()
 
-        except NetmikoAuthenticationException as e:
-            print(json.dumps({"type": "error", "msg": f"Authentication failed: {str(e)}"}), flush=True)
-            raise
-        except NetmikoTimeoutException as e:
-            print(json.dumps({"type": "error", "msg": f"Connection timeout: {str(e)}"}), flush=True)
-            raise
         except Exception as e:
             print(json.dumps({"type": "error", "msg": f"Connection failed: {str(e)}"}), flush=True)
             raise
 
     def _start_read_thread(self):
-        """Monitor connection - keep it alive but don't spam reads"""
-        import time
-
-        def keep_alive():
-            # Just keep the connection alive without aggressive reading
-            # The write() method will trigger reads when needed
-            while self.connection and self.connection.is_alive():
+        """Read from channel in background"""
+        def read_loop():
+            while self.channel and not self.channel.closed:
                 try:
-                    time.sleep(1)
-                except:
+                    # Non-blocking read with small timeout
+                    if self.channel.recv_ready():
+                        data = self.channel.recv(4096)
+                        if data:
+                            print(json.dumps({"type": "data", "data": data.decode('utf-8', errors='replace')}), flush=True)
+                    else:
+                        time.sleep(0.05)
+                except socket.timeout:
+                    time.sleep(0.05)
+                except Exception as e:
                     break
+
             print(json.dumps({"type": "closed"}), flush=True)
 
-        self.read_thread = threading.Thread(target=keep_alive, daemon=True)
-        self.read_thread.start()
+        thread = threading.Thread(target=read_loop, daemon=True)
+        thread.start()
 
     def write(self, data):
-        """Send command to device and read response"""
-        if self.connection and self.connection.is_alive():
+        """Write to shell"""
+        if self.channel and not self.channel.closed:
             try:
-                import time
-                self.connection.write_channel(data)
-                # Wait for device to process
-                time.sleep(0.2)
-                # Read and send all available output
-                while True:
-                    try:
-                        output = self.connection.read_channel()
-                        if output:
-                            print(json.dumps({"type": "data", "data": output}), flush=True)
-                        else:
-                            break  # No more data
-                    except:
-                        break
+                self.channel.send(data.encode('utf-8'))
             except Exception as e:
                 print(json.dumps({"type": "error", "msg": f"Write error: {str(e)}"}), flush=True)
+
+    def resize(self, cols, rows):
+        """Resize shell"""
+        if self.channel and not self.channel.closed:
+            try:
+                self.channel.resize_pty(cols, rows)
+            except:
+                pass
 
     def close(self):
         """Close connection"""
         try:
-            if self.connection:
-                self.connection.disconnect()
+            if self.channel:
+                self.channel.close()
+            if self.client:
+                self.client.close()
         except:
             pass
 
 def main():
-    agent = NetmikoAgent()
+    agent = SSHAgent()
 
     try:
         for line in sys.stdin:
@@ -125,20 +125,20 @@ def main():
                 cmd = json.loads(line.strip())
 
                 if cmd['type'] == 'connect':
-                    # Auto-detect device type from host or use cisco_ios as default
-                    device_type = cmd.get('deviceType', 'cisco_ios')
                     agent.connect(
                         host=cmd['host'],
                         port=cmd.get('port', 22),
                         username=cmd['username'],
                         password=cmd.get('password'),
                         private_key_path=cmd.get('privateKeyPath'),
-                        passphrase=cmd.get('passphrase'),
-                        device_type=device_type
+                        passphrase=cmd.get('passphrase')
                     )
 
                 elif cmd['type'] == 'write':
                     agent.write(cmd['data'])
+
+                elif cmd['type'] == 'resize':
+                    agent.resize(cmd['cols'], cmd['rows'])
 
                 elif cmd['type'] == 'close':
                     agent.close()
