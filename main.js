@@ -582,6 +582,7 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
   let resolved = false;
   let passwordSent = false;
   let dataBuffer = '';
+  let shellInitialized = false;
 
   const sendData = (data) => {
     event.sender.send(`term:data:${id}`, data);
@@ -604,8 +605,18 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
 
     // Resolve on first data received (connection is working)
     if (!resolved && dataBuffer.length > 0) {
-      console.log('[SSH] Data received, resolving connection immediately');
+      console.log('[SSH] Data received, resolving connection');
       resolved = true;
+
+      // Wait a bit for shell to initialize, then send Enter to wake it up
+      setTimeout(() => {
+        if (!shellInitialized) {
+          console.log('[SSH] Sending Enter to initialize shell');
+          proc.stdin.write('\n');
+          shellInitialized = true;
+        }
+      }, 300);
+
       resolve({ id });
     }
   };
