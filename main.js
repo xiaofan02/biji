@@ -554,7 +554,6 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
 
   const args = [
     '-tt',  // Force PTY allocation
-    '-v',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
     '-o', 'PasswordAuthentication=yes',
