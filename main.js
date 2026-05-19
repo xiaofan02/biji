@@ -592,7 +592,42 @@ ipcMain.handle('ssh:connect', async (event, config) => {
       port: config.port || 22,
       username: config.username,
       readyTimeout: 15000,
-      keepaliveInterval: 30000
+      keepaliveInterval: 30000,
+      algorithms: {
+        kex: [
+          'diffie-hellman-group14-sha256',
+          'diffie-hellman-group14-sha1',
+          'diffie-hellman-group1-sha1',
+          'diffie-hellman-group-exchange-sha256',
+          'diffie-hellman-group-exchange-sha1',
+          'ecdh-sha2-nistp256',
+          'ecdh-sha2-nistp384',
+          'ecdh-sha2-nistp521'
+        ],
+        cipher: [
+          'aes128-ctr',
+          'aes192-ctr',
+          'aes256-ctr',
+          'aes128-gcm@openssh.com',
+          'aes256-gcm@openssh.com',
+          'aes128-cbc',
+          'aes192-cbc',
+          'aes256-cbc',
+          '3des-cbc'
+        ],
+        serverHostKey: [
+          'ssh-rsa',
+          'rsa-sha2-512',
+          'rsa-sha2-256',
+          'ecdsa-sha2-nistp256',
+          'ssh-ed25519'
+        ],
+        hmac: [
+          'hmac-sha2-256',
+          'hmac-sha2-512',
+          'hmac-sha1'
+        ]
+      }
     };
     if (config.password) opts.password = config.password;
     if (config.privateKey) opts.privateKey = config.privateKey;
