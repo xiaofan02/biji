@@ -175,69 +175,49 @@ export class TerminalManager {
       }
     });
 
-    // 右键菜单 - 复制粘贴（在整个 div 上）
-    const contextMenuHandler = (e) => {
-      e.preventDefault();
-      const selection = term.getSelection();
-      const items = [];
+    // 右键菜单 - 复制粘贴
+    const setupContextMenu = () => {
+      const contextMenuHandler = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        const selection = term.getSelection();
+        const items = [];
 
-      if (selection && selection.trim()) {
+        if (selection && selection.trim()) {
+          items.push({
+            label: '📋 复制',
+            action: () => {
+              navigator.clipboard.writeText(selection).catch(() => {});
+            }
+          });
+        }
+
         items.push({
-          label: '📋 复制',
-          action: () => {
-            navigator.clipboard.writeText(selection).catch(() => {});
+          label: '📌 粘贴',
+          action: async () => {
+            try {
+              const text = await navigator.clipboard.readText();
+              if (type === 'ssh') window.biji.ssh.write(id, text);
+              else if (type === 'telnet') window.biji.telnet.write(id, text);
+            } catch (err) {
+              console.log('粘贴失败:', err);
+            }
           }
         });
-      }
 
-      items.push({
-        label: '📌 粘贴',
-        action: async () => {
-          try {
-            const text = await navigator.clipboard.readText();
-            if (type === 'ssh') window.biji.ssh.write(id, text);
-            else if (type === 'telnet') window.biji.telnet.write(id, text);
-          } catch (err) {
-            console.log('粘贴失败:', err);
-          }
+        if (items.length > 0) {
+          showContextMenu(e.clientX, e.clientY, items);
         }
-      });
+      };
 
-      if (items.length > 0) {
-        showContextMenu(e.clientX, e.clientY, items);
-      }
+      div.addEventListener('contextmenu', contextMenuHandler, true);
+      return contextMenuHandler;
     };
 
-    div.addEventListener('contextmenu', contextMenuHandler);
+    const contextMenuHandler = setupContextMenu();
 
-    // 快捷键支持
-    const keyHandler = (e) => {
-      // Ctrl+Shift+C - 复制
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyC') {
-        e.preventDefault();
-        const selection = term.getSelection();
-        if (selection) {
-          navigator.clipboard.writeText(selection).catch(() => {});
-        }
-      }
-      // Ctrl+Shift+V - 粘贴
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyV') {
-        e.preventDefault();
-        navigator.clipboard.readText().then(text => {
-          if (type === 'ssh') window.biji.ssh.write(id, text);
-          else if (type === 'telnet') window.biji.telnet.write(id, text);
-        }).catch(() => {});
-      }
-    };
-    div.addEventListener('keydown', keyHandler);
-
-    session.cleanup = () => {
-      off1(); off2(); off3();
-      disposableData?.dispose?.();
-      disposableResize?.dispose?.();
-      div.removeEventListener('contextmenu', contextMenuHandler);
-      div.removeEventListener('keydown', keyHandler);
-    };
+    session.cleanup = () => { off1(); off2(); off3(); disposableData?.dispose?.(); disposableResize?.dispose?.(); };
 
     const opt = document.createElement('option');
     opt.value = id;

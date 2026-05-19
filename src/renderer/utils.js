@@ -245,7 +245,7 @@ export function hideContextMenu() {
 
 document.addEventListener('click', hideContextMenu);
 document.addEventListener('contextmenu', (e) => {
-  if (!e.target.closest('.tree-node') && !e.target.closest('.tab')) {
+  if (!e.target.closest('.tree-node') && !e.target.closest('.tab') && !e.target.closest('.terminal-instance')) {
     hideContextMenu();
   }
 });
