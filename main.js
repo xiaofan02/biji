@@ -616,52 +616,63 @@ function trySSH2(id, config, event, resolve, reject) {
 
 function tryOpenSSH(id, config, event, resolve, reject) {
   const sshCmd = process.platform === 'win32' ? 'ssh.exe' : 'ssh';
+  console.log(`Attempting OpenSSH fallback with ${sshCmd}`);
+
   const args = [
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
-    '-p', config.port || 22,
+    '-o', 'PreferredAuthentications=password,keyboard-interactive',
+    '-p', String(config.port || 22),
     `${config.username}@${config.host}`
   ];
 
   try {
     const proc = spawn(sshCmd, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false
+      shell: false,
+      timeout: 30000
+    });
+
+    proc.on('error', (err) => {
+      console.log(`OpenSSH spawn error (${sshCmd}):`, err.message);
+      event.sender.send(`term:error:${id}`, `OpenSSH 不可用: ${err.message}`);
+      reject(err);
     });
 
     if (!proc.pid) {
       throw new Error('Failed to spawn ssh process');
     }
 
+    console.log(`OpenSSH process spawned with PID ${proc.pid}`);
     sshSessions.set(id, { process: proc, type: 'openssh' });
 
     proc.stdout.on('data', (data) => {
+      console.log('OpenSSH stdout:', data.toString('utf-8').slice(0, 100));
       event.sender.send(`term:data:${id}`, data.toString('utf-8'));
     });
 
     proc.stderr.on('data', (data) => {
+      console.log('OpenSSH stderr:', data.toString('utf-8').slice(0, 100));
       event.sender.send(`term:data:${id}`, data.toString('utf-8'));
     });
 
     proc.on('close', (code) => {
+      console.log(`OpenSSH process closed with code ${code}`);
       event.sender.send(`term:close:${id}`);
       sshSessions.delete(id);
     });
 
-    proc.on('error', (err) => {
-      console.log('OpenSSH error:', err.message);
-      event.sender.send(`term:error:${id}`, `OpenSSH 错误: ${err.message}`);
-      sshSessions.delete(id);
-    });
-
-    // Handle password if provided
+    // Handle password if provided (send immediately after connection)
     if (config.password) {
-      proc.stdin.write(config.password + '\n');
+      setTimeout(() => {
+        console.log('Sending password to OpenSSH');
+        proc.stdin.write(config.password + '\n');
+      }, 500);
     }
 
     resolve({ id });
   } catch (err) {
-    console.log('OpenSSH spawn failed:', err.message);
+    console.log('OpenSSH fallback failed:', err.message);
     event.sender.send(`term:error:${id}`, `SSH 连接失败: ${err.message}`);
     reject(err);
   }
