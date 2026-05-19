@@ -559,11 +559,11 @@ function tryOpenSSHDirect(id, config, event, resolve, reject) {
     '-o', 'PubkeyAuthentication=yes',
     '-o', 'PreferredAuthentications=password,publickey',
     '-o', 'ConnectTimeout=15',
-    '-o', 'KexAlgorithms=+diffie-hellman-group1-sha1',
-    '-o', 'HostKeyAlgorithms=+ssh-rsa',
-    '-o', 'PubkeyAcceptedAlgorithms=+ssh-rsa',
-    '-o', 'Ciphers=+3des-cbc,+aes128-cbc',
-    '-o', 'MACs=+hmac-sha1',
+    '-o', 'KexAlgorithms=diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,ecdh-sha2-nistp256',
+    '-o', 'HostKeyAlgorithms=ssh-rsa,rsa-sha2-256,rsa-sha2-512',
+    '-o', 'PubkeyAcceptedAlgorithms=ssh-rsa,rsa-sha2-256,rsa-sha2-512',
+    '-o', 'Ciphers=3des-cbc,aes128-cbc,aes128-ctr,aes256-cbc,aes256-ctr',
+    '-o', 'MACs=hmac-sha1,hmac-sha2-256',
     '-p', String(config.port || 22)
   ];
 
