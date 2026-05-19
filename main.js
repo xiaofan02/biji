@@ -5,6 +5,7 @@ const fsp = require('fs/promises');
 const net = require('net');
 const https = require('https');
 const http = require('http');
+const { spawn } = require('child_process');
 const { Client: SSHClient } = require('ssh2');
 const Store = require('electron-store');
 const MarkdownIt = require('markdown-it');
@@ -544,116 +545,162 @@ ipcMain.handle('ai:test', async (_e, provider) => {
 ipcMain.handle('ssh:connect', async (event, config) => {
   return new Promise((resolve, reject) => {
     const id = `ssh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const client = new SSHClient();
-    const termTypes = ['xterm-256color', 'vt100', 'linux'];
-    let termIdx = 0;
 
-    function tryShell() {
-      const termType = termTypes[termIdx];
-      const shellOpts = { cols: 80, rows: 24 };
-      if (termType) shellOpts.term = termType;
+    // Try ssh2 library first
+    trySSH2(id, config, event, resolve, reject);
+  });
+});
 
-      client.shell(shellOpts, (err, stream) => {
-        if (err) {
-          termIdx++;
-          if (termIdx < termTypes.length) {
-            tryShell();
-          } else {
-            reject(new Error(`无法创建 Shell: ${err.message}`));
-          }
-          return;
-        }
+function trySSH2(id, config, event, resolve, reject) {
+  const client = new SSHClient();
+  const termTypes = ['xterm-256color', 'vt100', 'linux'];
+  let termIdx = 0;
 
-        sshSessions.set(id, { client, stream });
-        stream.on('data', (data) => {
-          event.sender.send(`term:data:${id}`, data.toString('utf-8'));
-        });
-        stream.on('close', () => {
-          event.sender.send(`term:close:${id}`);
-          sshSessions.delete(id);
+  function tryShell() {
+    const termType = termTypes[termIdx];
+    const shellOpts = { cols: 80, rows: 24 };
+    if (termType) shellOpts.term = termType;
+
+    client.shell(shellOpts, (err, stream) => {
+      if (err) {
+        termIdx++;
+        if (termIdx < termTypes.length) {
+          tryShell();
+        } else {
+          // SSH2 failed, try OpenSSH fallback
+          console.log('ssh2 shell creation failed, trying OpenSSH fallback');
           client.end();
-        });
-        resolve({ id });
+          tryOpenSSH(id, config, event, resolve, reject);
+        }
+        return;
+      }
+
+      sshSessions.set(id, { client, stream, type: 'ssh2' });
+      stream.on('data', (data) => {
+        event.sender.send(`term:data:${id}`, data.toString('utf-8'));
       });
+      stream.on('close', () => {
+        event.sender.send(`term:close:${id}`);
+        sshSessions.delete(id);
+        client.end();
+      });
+      resolve({ id });
+    });
+  }
+
+  client.on('ready', tryShell);
+  client.on('error', (err) => {
+    console.log('ssh2 connection error:', err.message);
+    // Try OpenSSH fallback
+    client.end();
+    tryOpenSSH(id, config, event, resolve, reject);
+  });
+  client.on('close', () => {
+    event.sender.send(`term:close:${id}`);
+    sshSessions.delete(id);
+  });
+
+  const opts = {
+    host: config.host,
+    port: config.port || 22,
+    username: config.username,
+    readyTimeout: 30000,
+    keepaliveInterval: 30000,
+    strictHostKey: false
+  };
+  if (config.password) opts.password = config.password;
+  if (config.privateKey) opts.privateKey = config.privateKey;
+  if (config.passphrase) opts.passphrase = config.passphrase;
+  client.connect(opts);
+}
+
+function tryOpenSSH(id, config, event, resolve, reject) {
+  const sshCmd = process.platform === 'win32' ? 'ssh.exe' : 'ssh';
+  const args = [
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-p', config.port || 22,
+    `${config.username}@${config.host}`
+  ];
+
+  try {
+    const proc = spawn(sshCmd, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false
+    });
+
+    if (!proc.pid) {
+      throw new Error('Failed to spawn ssh process');
     }
 
-    client.on('ready', tryShell);
-    client.on('error', (err) => {
-      event.sender.send(`term:error:${id}`, err.message);
-      reject(err);
+    sshSessions.set(id, { process: proc, type: 'openssh' });
+
+    proc.stdout.on('data', (data) => {
+      event.sender.send(`term:data:${id}`, data.toString('utf-8'));
     });
-    client.on('close', () => {
+
+    proc.stderr.on('data', (data) => {
+      event.sender.send(`term:data:${id}`, data.toString('utf-8'));
+    });
+
+    proc.on('close', (code) => {
       event.sender.send(`term:close:${id}`);
       sshSessions.delete(id);
     });
 
-    const opts = {
-      host: config.host,
-      port: config.port || 22,
-      username: config.username,
-      readyTimeout: 30000,
-      keepaliveInterval: 30000,
-      strictHostKey: false,
-      algorithms: {
-        kex: [
-          'curve25519-sha256',
-          'curve25519-sha256@libssh.org',
-          'ecdh-sha2-nistp256',
-          'ecdh-sha2-nistp384',
-          'ecdh-sha2-nistp521',
-          'diffie-hellman-group-exchange-sha256',
-          'diffie-hellman-group-exchange-sha1'
-        ],
-        cipher: [
-          'aes128-ctr',
-          'aes192-ctr',
-          'aes256-ctr',
-          'aes128-gcm@openssh.com',
-          'aes256-gcm@openssh.com',
-          'aes128-cbc',
-          'aes192-cbc',
-          'aes256-cbc'
-        ],
-        serverHostKey: [
-          'ssh-ed25519',
-          'rsa-sha2-512',
-          'rsa-sha2-256',
-          'ecdsa-sha2-nistp256',
-          'ecdsa-sha2-nistp384',
-          'ecdsa-sha2-nistp521',
-          'ssh-rsa'
-        ],
-        hmac: [
-          'hmac-sha2-256-etm@openssh.com',
-          'hmac-sha2-512-etm@openssh.com',
-          'hmac-sha2-256',
-          'hmac-sha2-512',
-          'hmac-sha1'
-        ]
-      }
-    };
-    if (config.password) opts.password = config.password;
-    if (config.privateKey) opts.privateKey = config.privateKey;
-    if (config.passphrase) opts.passphrase = config.passphrase;
-    client.connect(opts);
-  });
-});
+    proc.on('error', (err) => {
+      console.log('OpenSSH error:', err.message);
+      event.sender.send(`term:error:${id}`, `OpenSSH 错误: ${err.message}`);
+      sshSessions.delete(id);
+    });
+
+    // Handle password if provided
+    if (config.password) {
+      proc.stdin.write(config.password + '\n');
+    }
+
+    resolve({ id });
+  } catch (err) {
+    console.log('OpenSSH spawn failed:', err.message);
+    event.sender.send(`term:error:${id}`, `SSH 连接失败: ${err.message}`);
+    reject(err);
+  }
+}
 
 ipcMain.handle('ssh:write', (_e, id, data) => {
   const s = sshSessions.get(id);
-  if (s) s.stream.write(data);
+  if (!s) return false;
+
+  if (s.type === 'ssh2') {
+    s.stream.write(data);
+  } else if (s.type === 'openssh') {
+    s.process.stdin.write(data);
+  }
   return true;
 });
 
 ipcMain.handle('ssh:resize', (_e, id, cols, rows) => {
   const s = sshSessions.get(id);
-  if (s) s.stream.setWindow(rows, cols, 480, 640);
+  if (!s) return false;
+
+  if (s.type === 'ssh2') {
+    s.stream.setWindow(rows, cols, 480, 640);
+  }
+  // OpenSSH doesn't support dynamic resizing via stdin
   return true;
 });
 
 ipcMain.handle('ssh:close', (_e, id) => {
   const s = sshSessions.get(id);
-  if (s) { s.client.end(); sshSessions.delete(id); }
+  if (!s) return false;
+
+  if (s.type === 'ssh2') {
+    s.client.end();
+  } else if (s.type === 'openssh') {
+    s.process.stdin.end();
+    s.process.kill();
+  }
+  sshSessions.delete(id);
   return true;
 });
 
