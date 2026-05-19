@@ -42,12 +42,18 @@ class NetmikoAgent:
 
             print(json.dumps({"type": "debug", "msg": "Connected successfully"}), flush=True)
 
-            # Read initial prompt
+            # Initialize shell by sending newline and reading response
             import time
-            time.sleep(0.3)
-            output = self.connection.read_channel()
-            if output:
-                print(json.dumps({"type": "data", "data": output}), flush=True)
+            self.connection.write_channel('\n')
+            time.sleep(0.5)
+
+            # Read initial output/prompt
+            try:
+                output = self.connection.read_channel()
+                if output:
+                    print(json.dumps({"type": "data", "data": output}), flush=True)
+            except:
+                pass
 
             print(json.dumps({"type": "connected"}), flush=True)
 
