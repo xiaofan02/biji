@@ -58,24 +58,31 @@ class NetmikoAgent:
 
     def _start_read_thread(self):
         """Monitor connection and send prompts"""
+        import time
+
         def read_loop():
             try:
                 # Send initial newline to trigger prompt
                 self.connection.write_channel('\n')
+                time.sleep(0.5)
 
                 # Get initial prompt
                 output = self.connection.read_channel()
                 if output:
                     print(json.dumps({"type": "data", "data": output}), flush=True)
 
-                # Keep connection alive and forward any unsolicited output
+                # Keep connection alive and forward unsolicited output with polling
                 while self.connection.is_alive():
                     try:
+                        # Use a longer sleep to reduce CPU usage and spam
+                        time.sleep(0.3)
                         output = self.connection.read_channel()
-                        if output:
+                        if output and output.strip():  # Only send non-empty output
                             print(json.dumps({"type": "data", "data": output}), flush=True)
-                    except:
-                        break
+                    except Exception as e:
+                        # Ignore read errors, connection might be idle
+                        time.sleep(0.5)
+                        continue
 
             except Exception as e:
                 print(json.dumps({"type": "error", "msg": f"Read error: {str(e)}"}), flush=True)
@@ -89,14 +96,11 @@ class NetmikoAgent:
         """Send command to device"""
         if self.connection and self.connection.is_alive():
             try:
-                self.connection.write_channel(data)
-                # Give device time to process
                 import time
-                time.sleep(0.1)
-                # Read response
-                output = self.connection.read_channel()
-                if output:
-                    print(json.dumps({"type": "data", "data": output}), flush=True)
+                self.connection.write_channel(data)
+                # Don't immediately read - let the read_loop handle it
+                # This prevents blocking and allows proper command execution
+                time.sleep(0.05)
             except Exception as e:
                 print(json.dumps({"type": "error", "msg": f"Write error: {str(e)}"}), flush=True)
 
