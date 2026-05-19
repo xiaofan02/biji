@@ -7,6 +7,7 @@ const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
 const { Client: SSHClient } = require('ssh2');
+const { IPty, spawn: ptySpawn } = require('node-pty');
 const Store = require('electron-store');
 const MarkdownIt = require('markdown-it');
 const markdownItTaskLists = require('markdown-it-task-lists');
@@ -641,17 +642,16 @@ Host ${config.host}
     .catch(err => console.log('SSH config setup warning:', err.message));
 
   const sshCmd = process.platform === 'win32' ? 'ssh.exe' : 'ssh';
-  console.log(`Attempting OpenSSH fallback with ${sshCmd}`);
+  console.log(`Attempting OpenSSH with PTY (${sshCmd})`);
 
   // Build arguments
   const args = [
-    '-tt', // Force TTY allocation (twice for extra reliability)
+    '-tt',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
     '-o', 'NumberOfPasswordPrompts=1'
   ];
 
-  // If password is provided, use -o BatchMode=no to allow password auth
   if (config.password) {
     args.push('-o', 'BatchMode=no');
     args.push('-o', 'PasswordAuthentication=yes');
@@ -661,65 +661,54 @@ Host ${config.host}
   args.push(`${config.username}@${config.host}`);
 
   try {
-    // Use 'inherit' for stderr to see actual output, pipe for stdin/stdout
-    const proc = spawn(sshCmd, args, {
-      stdio: ['pipe', 'pipe', 'inherit'],
-      shell: false,
-      timeout: 30000
+    // Use node-pty to create a real PTY
+    const pty = ptySpawn(sshCmd, args, {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd: process.cwd()
     });
 
-    proc.on('error', (err) => {
-      console.log(`OpenSSH spawn error (${sshCmd}):`, err.message);
-      event.sender.send(`term:error:${id}`, `OpenSSH 不可用: ${err.message}`);
-      reject(err);
-    });
+    console.log(`OpenSSH PTY created with PID ${pty.pid}`);
+    sshSessions.set(id, { process: pty, type: 'openssh-pty' });
 
-    if (!proc.pid) {
-      throw new Error('Failed to spawn ssh process');
-    }
-
-    console.log(`OpenSSH process spawned with PID ${proc.pid}`);
-    sshSessions.set(id, { process: proc, type: 'openssh' });
-
-    let waitingForPassword = !!config.password;
     let passwordSent = false;
+    let buffer = '';
 
-    proc.stdout.on('data', (data) => {
-      const str = data.toString('utf-8');
-      console.log('OpenSSH stdout:', str.slice(0, 100));
-      event.sender.send(`term:data:${id}`, str);
+    pty.onData((data) => {
+      buffer += data;
+      console.log('PTY data:', data.slice(0, 100));
+      event.sender.send(`term:data:${id}`, data);
 
       // Check for password prompt
-      if (waitingForPassword && !passwordSent && (str.includes('Password:') || str.includes('password'))) {
+      if (config.password && !passwordSent && (buffer.includes('Password:') || buffer.includes('password:'))) {
         console.log('Password prompt detected, sending password');
-        proc.stdin.write(config.password + '\n');
+        pty.write(config.password + '\r\n');
         passwordSent = true;
-        waitingForPassword = false;
+        buffer = '';
       }
     });
 
-    proc.on('close', (code) => {
-      console.log(`OpenSSH process closed with code ${code}`);
+    pty.onExit((code) => {
+      console.log(`OpenSSH PTY exited with code ${code.exitCode}`);
       event.sender.send(`term:close:${id}`);
       sshSessions.delete(id);
     });
 
-    // For non-interactive password input, send immediately
+    // Send password after delay if not detected in prompt
     if (config.password) {
-      // Try sending password with a delay
       setTimeout(() => {
         if (!passwordSent) {
-          console.log('Sending password to OpenSSH (timeout trigger)');
-          proc.stdin.write(config.password + '\n');
+          console.log('Sending password to PTY (timeout)');
+          pty.write(config.password + '\r\n');
           passwordSent = true;
-          waitingForPassword = false;
         }
       }, 1500);
     }
 
     resolve({ id });
   } catch (err) {
-    console.log('OpenSSH fallback failed:', err.message);
+    console.log('OpenSSH PTY failed:', err.message);
     event.sender.send(`term:error:${id}`, `SSH 连接失败: ${err.message}`);
     reject(err);
   }
@@ -733,6 +722,8 @@ ipcMain.handle('ssh:write', (_e, id, data) => {
     s.stream.write(data);
   } else if (s.type === 'openssh') {
     s.process.stdin.write(data);
+  } else if (s.type === 'openssh-pty') {
+    s.process.write(data);
   }
   return true;
 });
@@ -743,8 +734,9 @@ ipcMain.handle('ssh:resize', (_e, id, cols, rows) => {
 
   if (s.type === 'ssh2') {
     s.stream.setWindow(rows, cols, 480, 640);
+  } else if (s.type === 'openssh-pty') {
+    s.process.resize(cols, rows);
   }
-  // OpenSSH doesn't support dynamic resizing via stdin
   return true;
 });
 
@@ -756,6 +748,8 @@ ipcMain.handle('ssh:close', (_e, id) => {
     s.client.end();
   } else if (s.type === 'openssh') {
     s.process.stdin.end();
+    s.process.kill();
+  } else if (s.type === 'openssh-pty') {
     s.process.kill();
   }
   sshSessions.delete(id);
