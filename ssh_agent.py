@@ -23,6 +23,36 @@ class SSHAgent:
             self.client = paramiko.SSHClient()
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
+            # Configure to support old algorithms
+            transport = paramiko.Transport((host, int(port)))
+
+            # Set algorithms to support old/legacy SSH servers
+            transport.get_security_options().kex = [
+                'diffie-hellman-group1-sha1',
+                'diffie-hellman-group14-sha1',
+                'ecdh-sha2-nistp256',
+                'ecdh-sha2-nistp384',
+                'ecdh-sha2-nistp521'
+            ]
+            transport.get_security_options().key_types = [
+                'ssh-rsa',
+                'rsa-sha2-256',
+                'rsa-sha2-512'
+            ]
+            transport.get_security_options().ciphers = [
+                '3des-cbc',
+                'aes128-cbc',
+                'aes128-ctr',
+                'aes256-cbc',
+                'aes256-ctr'
+            ]
+            transport.get_security_options().digests = [
+                'hmac-sha1',
+                'hmac-sha2-256'
+            ]
+
+            print(json.dumps({"type": "debug", "msg": f"Connecting to {username}@{host}:{port}"}), flush=True)
+
             # Prepare key
             pkey = None
             if private_key_path:
@@ -39,8 +69,6 @@ class SSHAgent:
                             pkey = paramiko.Ed25519Key.from_private_key_file(private_key_path)
                     except:
                         pass
-
-            print(json.dumps({"type": "debug", "msg": f"Connecting to {username}@{host}:{port}"}), flush=True)
 
             # Connect
             self.client.connect(
@@ -167,3 +195,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

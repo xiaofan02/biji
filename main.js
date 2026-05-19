@@ -76,7 +76,10 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    sshSessions.forEach(s => s.client.end());
+    sshSessions.forEach(s => {
+      if (s.type === 'python') s.process.kill();
+      else if (s.client) s.client.end();
+    });
     sshSessions.clear();
     telnetSessions.forEach(s => s.socket.destroy());
     telnetSessions.clear();
