@@ -645,6 +645,7 @@ Host ${config.host}
 
   // Build arguments
   const args = [
+    '-tt', // Force TTY allocation (twice for extra reliability)
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
     '-o', 'NumberOfPasswordPrompts=1'
