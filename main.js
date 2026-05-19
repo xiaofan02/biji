@@ -661,8 +661,9 @@ Host ${config.host}
   args.push(`${config.username}@${config.host}`);
 
   try {
+    // Use 'inherit' for stderr to see actual output, pipe for stdin/stdout
     const proc = spawn(sshCmd, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'inherit'],
       shell: false,
       timeout: 30000
     });
@@ -689,19 +690,11 @@ Host ${config.host}
       event.sender.send(`term:data:${id}`, str);
 
       // Check for password prompt
-      if (waitingForPassword && !passwordSent && str.includes('Password:')) {
+      if (waitingForPassword && !passwordSent && (str.includes('Password:') || str.includes('password'))) {
         console.log('Password prompt detected, sending password');
         proc.stdin.write(config.password + '\n');
         passwordSent = true;
-      }
-    });
-
-    proc.stderr.on('data', (data) => {
-      const str = data.toString('utf-8');
-      console.log('OpenSSH stderr:', str.slice(0, 100));
-      // Send important error messages
-      if (str.includes('Password') || str.includes('authentication') || str.includes('denied')) {
-        event.sender.send(`term:data:${id}`, str);
+        waitingForPassword = false;
       }
     });
 
@@ -719,8 +712,9 @@ Host ${config.host}
           console.log('Sending password to OpenSSH (timeout trigger)');
           proc.stdin.write(config.password + '\n');
           passwordSent = true;
+          waitingForPassword = false;
         }
-      }, 2000);
+      }, 1500);
     }
 
     resolve({ id });
