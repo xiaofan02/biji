@@ -175,13 +175,13 @@ export class TerminalManager {
       }
     });
 
-    // 右键菜单 - 复制粘贴
-    div.addEventListener('contextmenu', (e) => {
+    // 右键菜单 - 复制粘贴（在整个 div 上）
+    const contextMenuHandler = (e) => {
       e.preventDefault();
       const selection = term.getSelection();
       const items = [];
 
-      if (selection) {
+      if (selection && selection.trim()) {
         items.push({
           label: '📋 复制',
           action: () => {
@@ -197,15 +197,18 @@ export class TerminalManager {
             const text = await navigator.clipboard.readText();
             if (type === 'ssh') window.biji.ssh.write(id, text);
             else if (type === 'telnet') window.biji.telnet.write(id, text);
-          } catch (e) {}
+          } catch (err) {
+            console.log('粘贴失败:', err);
+          }
         }
       });
 
       if (items.length > 0) {
-        const rect = div.getBoundingClientRect();
         showContextMenu(e.clientX, e.clientY, items);
       }
-    });
+    };
+
+    div.addEventListener('contextmenu', contextMenuHandler);
 
     // 快捷键支持
     const keyHandler = (e) => {
@@ -232,6 +235,7 @@ export class TerminalManager {
       off1(); off2(); off3();
       disposableData?.dispose?.();
       disposableResize?.dispose?.();
+      div.removeEventListener('contextmenu', contextMenuHandler);
       div.removeEventListener('keydown', keyHandler);
     };
 
