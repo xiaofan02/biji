@@ -175,6 +175,14 @@ export class TerminalManager {
       }
     });
 
+    // 选中即复制
+    const disposableSelection = term.onSelectionChange(() => {
+      const sel = term.getSelection();
+      if (sel && sel.length > 0) {
+        navigator.clipboard.writeText(sel).catch(() => {});
+      }
+    });
+
     // 右键菜单 - 复制粘贴
     const setupContextMenu = () => {
       const contextMenuHandler = (e) => {
@@ -217,7 +225,7 @@ export class TerminalManager {
 
     const contextMenuHandler = setupContextMenu();
 
-    session.cleanup = () => { off1(); off2(); off3(); disposableData?.dispose?.(); disposableResize?.dispose?.(); };
+    session.cleanup = () => { off1(); off2(); off3(); disposableData?.dispose?.(); disposableResize?.dispose?.(); disposableSelection?.dispose?.(); };
 
     const opt = document.createElement('option');
     opt.value = id;

@@ -68,6 +68,7 @@ export class MarkdownPreview {
     try {
       const html = await window.biji.md.render(this.currentTab.content || '');
       this.body.innerHTML = html;
+      this.rewriteRelativeImages(this.currentTab.path);
       this.body.querySelectorAll('a').forEach(a => {
         a.addEventListener('click', (e) => {
           e.preventDefault();
@@ -77,5 +78,19 @@ export class MarkdownPreview {
     } catch (e) {
       this.body.innerHTML = '<p style="color:var(--error)">预览失败:' + escapeHtml(e.message) + '</p>';
     }
+  }
+
+  rewriteRelativeImages(notePath) {
+    if (!notePath) return;
+    const noteDir = notePath.replace(/\\/g, '/').replace(/\/[^/]*$/, '');
+    this.body.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src') || '';
+      if (!src) return;
+      if (/^(https?:|data:|blob:|file:|\/\/)/i.test(src)) return;
+      const normalized = src.replace(/\\/g, '/').replace(/^\.\//, '');
+      const isAbs = normalized.startsWith('/') || /^[a-zA-Z]:\//.test(normalized);
+      const full = isAbs ? normalized : `${noteDir}/${normalized}`;
+      img.src = 'file://' + (full.startsWith('/') ? full : '/' + full);
+    });
   }
 }

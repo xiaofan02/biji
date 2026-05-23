@@ -293,6 +293,22 @@ ipcMain.handle('fs:delete', async (_e, target) => {
 
 ipcMain.handle('fs:workspace', () => store.get('workspace'));
 
+// 保存图片到笔记同级 assets 目录, 返回相对路径(用于 markdown 引用)
+ipcMain.handle('fs:save-image', async (_e, notePath, data, ext) => {
+  const dir = path.dirname(notePath);
+  const assetsDir = path.join(dir, 'assets');
+  await fsp.mkdir(assetsDir, { recursive: true });
+  const safeExt = (ext || 'png').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'png';
+  const ts = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}-${Math.random().toString(36).slice(2,6)}`;
+  const fileName = `image-${stamp}.${safeExt}`;
+  const fullPath = path.join(assetsDir, fileName);
+  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  await fsp.writeFile(fullPath, buf);
+  return { fullPath, relPath: `assets/${fileName}` };
+});
+
 ipcMain.handle('fs:search', async (_e, query) => {
   if (!query) return [];
   const ws = store.get('workspace');
@@ -771,6 +787,16 @@ ipcMain.handle('sys:show-in-folder', (_e, p) => shell.showItemInFolder(p));
 ipcMain.handle('sys:choose-file', async () => {
   const r = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'] });
   return r.canceled ? null : r.filePaths[0];
+});
+ipcMain.handle('sys:choose-image', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }]
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const p = r.filePaths[0];
+  const buf = await fsp.readFile(p);
+  return { data: new Uint8Array(buf), ext: path.extname(p).slice(1).toLowerCase() || 'png' };
 });
 ipcMain.handle('sys:choose-folder', async () => {
   const r = await dialog.showOpenDialog(mainWindow, {

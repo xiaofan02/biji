@@ -14,7 +14,8 @@ contextBridge.exposeInMainWorld('biji', {
     rename: (oldP, newP) => ipcRenderer.invoke('fs:rename', oldP, newP),
     delete: (p) => ipcRenderer.invoke('fs:delete', p),
     workspace: () => ipcRenderer.invoke('fs:workspace'),
-    search: (q) => ipcRenderer.invoke('fs:search', q)
+    search: (q) => ipcRenderer.invoke('fs:search', q),
+    saveImage: (notePath, data, ext) => ipcRenderer.invoke('fs:save-image', notePath, data, ext)
   },
   ai: {
     chat: (payload) => ipcRenderer.invoke('ai:chat', payload),
@@ -70,6 +71,7 @@ contextBridge.exposeInMainWorld('biji', {
     showInFolder: (p) => ipcRenderer.invoke('sys:show-in-folder', p),
     chooseFile: () => ipcRenderer.invoke('sys:choose-file'),
     chooseFolder: () => ipcRenderer.invoke('sys:choose-folder'),
+    chooseImage: () => ipcRenderer.invoke('sys:choose-image'),
     readFile: (p) => ipcRenderer.invoke('sys:read-file', p)
   },
   md: {

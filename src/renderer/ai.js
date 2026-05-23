@@ -22,7 +22,7 @@ export class AIChat {
 
     el('#aiSend').addEventListener('click', () => this.send());
     this.inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         this.send();
       }

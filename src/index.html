@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; connect-src 'self' https: http: ws: wss:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http: file:; connect-src 'self' https: http: ws: wss:;">
   <title>笔记 Biji - 本地知识库</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
@@ -25,6 +25,7 @@
         <button class="icon-btn" id="btnNewNote" title="新建笔记 (Ctrl+N)">📝</button>
         <button class="icon-btn" id="btnNewFolder" title="新建文件夹">📁</button>
         <button class="icon-btn" id="btnSave" title="保存 (Ctrl+S)">💾</button>
+        <button class="icon-btn" id="btnInsertImage" title="插入图片 (Ctrl+Shift+I)">🖼️</button>
         <button class="icon-btn" id="btnAI" title="AI 助手 (Ctrl+I)">🤖</button>
         <button class="icon-btn" id="btnTerminal" title="远程终端 (Ctrl+T)">⌨️</button>
         <button class="icon-btn" id="btnPreview" title="切换预览 (Ctrl+Shift+P)">👁️</button>
@@ -110,7 +111,7 @@
             <label><input type="checkbox" id="aiStream" checked> 流式输出</label>
           </div>
           <div class="ai-input-area">
-            <textarea id="aiInput" placeholder="问我任何问题... (Ctrl+Enter 发送)"></textarea>
+            <textarea id="aiInput" placeholder="问我任何问题... (Enter 发送, Shift+Enter 换行)"></textarea>
             <button class="btn primary" id="aiSend">发送</button>
           </div>
         </div>

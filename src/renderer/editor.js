@@ -83,12 +83,22 @@ export class EditorManager {
       this.saveActive();
     });
 
+    // Ctrl+Shift+I 插入图片
+    this.editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyI,
+      () => this.insertImageFromDialog()
+    );
+
+    // 监听编辑器内的粘贴/拖拽图片
+    this.attachImageHandlers();
+
     bus.on('note:open', (p) => this.openFile(p));
     bus.on('note:deleted', (p) => this.closeTab(p));
     bus.on('note:renamed', (oldP, newP) => this.renameTab(oldP, newP));
 
     window.biji.menu.on('menu:save', () => this.saveActive());
     el('#btnSave').addEventListener('click', () => this.saveActive());
+    el('#btnInsertImage').addEventListener('click', () => this.insertImageFromDialog());
 
     window.addEventListener('resize', () => this.editor?.layout());
     bus.on('resize', () => this.editor?.layout());
@@ -224,6 +234,84 @@ export class EditorManager {
     } catch (e) {
       toast('保存失败:' + e.message, 'error');
     }
+  }
+
+  attachImageHandlers() {
+    const domNode = this.editor.getDomNode();
+    if (!domNode) return;
+
+    domNode.addEventListener('paste', async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          e.preventDefault();
+          e.stopPropagation();
+          const file = it.getAsFile();
+          if (file) await this.saveAndInsertImage(file);
+          return;
+        }
+      }
+    }, true);
+
+    domNode.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types?.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+
+    domNode.addEventListener('drop', async (e) => {
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+      if (imgs.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      for (const f of imgs) await this.saveAndInsertImage(f);
+    }, true);
+  }
+
+  async insertImageFromDialog() {
+    const tab = this.tabs[this.activeIndex];
+    if (!tab) {
+      toast('请先打开一篇笔记', 'warning');
+      return;
+    }
+    try {
+      const res = await window.biji.sys.chooseImage();
+      if (!res) return;
+      const saved = await window.biji.fs.saveImage(tab.path, res.data, res.ext);
+      this.insertTextAtCursor(`![](${saved.relPath})`);
+      toast('✓ 已插入图片', 'success', 1500);
+    } catch (e) {
+      toast('插入图片失败:' + e.message, 'error');
+    }
+  }
+
+  async saveAndInsertImage(file) {
+    const tab = this.tabs[this.activeIndex];
+    if (!tab) {
+      toast('请先打开一篇笔记', 'warning');
+      return;
+    }
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const ext = (file.type.split('/')[1] || 'png').toLowerCase();
+      const saved = await window.biji.fs.saveImage(tab.path, buf, ext);
+      this.insertTextAtCursor(`![](${saved.relPath})`);
+      toast('✓ 已插入图片', 'success', 1500);
+    } catch (e) {
+      toast('插入图片失败:' + e.message, 'error');
+    }
+  }
+
+  insertTextAtCursor(text) {
+    if (!this.editor) return;
+    const sel = this.editor.getSelection();
+    const op = { range: sel, text, forceMoveMarkers: true };
+    this.editor.executeEdits('insert-image', [op]);
+    this.editor.focus();
   }
 
   getActiveTab() {
