@@ -1,0 +1,53 @@
+/* 飞书风格设计令牌 —— 浅色/深色双主题,通过 <html data-theme> 切换 */
+:root,
+[data-theme='light'] {
+  --accent: #3370ff;
+  --accent-hover: #245bdb;
+  --accent-soft: rgba(51, 112, 255, 0.1);
+  --selection: rgba(51, 112, 255, 0.2);
+
+  --bg: #ffffff;
+  --bg-sidebar: #f7f8fa;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(31, 35, 41, 0.06);
+  --bg-active: rgba(51, 112, 255, 0.1);
+  --bg-input: #f2f3f5;
+
+  --text: #1f2329;
+  --text-secondary: #646a73;
+  --text-tertiary: #8f959e;
+  --text-on-accent: #ffffff;
+
+  --border: #dee0e3;
+  --border-light: #eff0f1;
+
+  --shadow: 0 4px 16px rgba(31, 35, 41, 0.1);
+  --shadow-sm: 0 2px 8px rgba(31, 35, 41, 0.08);
+
+  --doc-max-width: 820px;
+}
+
+[data-theme='dark'] {
+  --accent: #4a7dff;
+  --accent-hover: #6b96ff;
+  --accent-soft: rgba(74, 125, 255, 0.16);
+  --selection: rgba(74, 125, 255, 0.32);
+
+  --bg: #1a1a1a;
+  --bg-sidebar: #1f1f1f;
+  --bg-elevated: #252525;
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-active: rgba(74, 125, 255, 0.18);
+  --bg-input: #2b2b2b;
+
+  --text: #e6e6e6;
+  --text-secondary: #a6a6a6;
+  --text-tertiary: #7a7a7a;
+  --text-on-accent: #ffffff;
+
+  --border: #3a3a3a;
+  --border-light: #2e2e2e;
+
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+}

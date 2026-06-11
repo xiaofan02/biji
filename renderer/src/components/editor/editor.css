@@ -1,0 +1,314 @@
+/* ===== BlockNote 飞书风格深度定制 ===== */
+
+/* 用 BlockNote 官方 CSS 变量做主题融合:背景透明交给页面,文字/边框走我们的令牌 */
+.doc-scroll .bn-container {
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: var(--text);
+  --bn-colors-menu-background: var(--bg-elevated);
+  --bn-colors-menu-text: var(--text);
+  --bn-colors-hovered-background: var(--bg-hover);
+  --bn-colors-hovered-text: var(--text);
+  --bn-colors-selected-background: var(--accent);
+  --bn-colors-selected-text: #fff;
+  --bn-colors-border: var(--border);
+  --bn-colors-side-menu: var(--text-tertiary);
+  --bn-font-family: inherit;
+  background: transparent;
+  font-size: var(--editor-font-size, 16px);
+}
+
+/* 正文容器:清掉默认横向内边距,由外层 .doc-scroll 控制宽度与留白 */
+.doc-scroll .bn-editor {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.doc-scroll .ProseMirror {
+  font-size: var(--editor-font-size, 16px);
+  line-height: 1.75;
+  color: var(--text);
+}
+
+/* 块间距:飞书式宽松呼吸感 */
+.doc-scroll .bn-block-outer:not(:first-child) {
+  margin-top: 6px;
+}
+.doc-scroll .bn-block-content {
+  padding-block: 3px;
+}
+
+/* 标题:层级字号 + 上方留白,贴近飞书 */
+.doc-scroll [data-content-type='heading'] {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.doc-scroll .bn-block-outer [data-level='1'] {
+  font-size: 1.75em;
+  margin-top: 1.2em;
+}
+.doc-scroll .bn-block-outer [data-level='2'] {
+  font-size: 1.4em;
+  margin-top: 1em;
+}
+.doc-scroll .bn-block-outer [data-level='3'] {
+  font-size: 1.18em;
+  margin-top: 0.8em;
+}
+
+/* 段落 */
+.doc-scroll [data-content-type='paragraph'] {
+  color: var(--text);
+}
+
+/* 行内代码 */
+.doc-scroll .bn-inline-content code {
+  background: var(--bg-hover);
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.9em;
+  color: var(--accent);
+}
+
+/* 代码块:圆角卡片 + 顶部语言条(复用 BlockNote 自带语言选择器)+ 右上悬浮复制,贴近飞书。
+   注意:自定义代码块(createCodeBlockSpec)自带 <select> 语言选择器(绝对定位、悬停才现),
+   故这里不再用 ::before 注入"代码块"文字(会与 select 重叠),仅画一条顶部条做背景。 */
+.doc-scroll [data-content-type='codeBlock'] {
+  position: relative;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 14px 0;
+  padding-top: 36px; /* 顶部语言条留位 */
+  overflow: hidden;
+}
+/* 顶部语言条:仅底色 + 分隔线;语言文字交给自带 <select> */
+.doc-scroll [data-content-type='codeBlock']::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+  z-index: 0;
+}
+/* 关键:.bn-block-content 是 display:flex 行布局,selectWrapper(含 <select> 的 div)
+   是 <pre> 前面的 flex 兄弟项。将其整体移出文档流,保证 <pre> 从最左渲染、
+   彻底消除 flex 行布局把代码首行向右挤的隐患(用户反馈的"首行缩进")。 */
+.doc-scroll [data-content-type='codeBlock'] > div {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+}
+/* 语言选择器:默认是悬停才淡入 → 改为常显并移入顶部条左侧,做成飞书式干净下拉(带 ▾ 箭头) */
+.doc-scroll [data-content-type='codeBlock'] > div > select {
+  opacity: 1 !important;
+  position: absolute;
+  top: 7px;
+  left: 12px;
+  z-index: 2;
+  height: 22px;
+  font-size: 12px;
+  color: var(--text-secondary) !important;
+  appearance: none;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238f959e' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")
+    no-repeat right 6px center !important;
+  background-size: 9px !important;
+  border-radius: 6px;
+  padding: 0 20px 0 8px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.doc-scroll [data-content-type='codeBlock'] > div > select:hover {
+  background-color: var(--bg-elevated) !important;
+  color: var(--text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] > div > select > option {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+/* pre / code:顶部条之下;横向滚动;所有行左对齐(显式归零,消除首行视觉缩进) */
+.doc-scroll [data-content-type='codeBlock'] pre {
+  padding: 12px 16px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+  text-indent: 0;
+}
+.doc-scroll [data-content-type='codeBlock'] code {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
+  text-indent: 0;
+  /* 关键修复:全局 global.css 的 code{padding:1px 5px}(给行内代码用)会泄漏到代码块的
+     <code>。该 <code> 是 display:inline,inline 元素的 padding-left 只作用于整段起点(=首行行首)、
+     换行后不重复,故恰好把首行右移 5px。这里归零彻底消除"首行缩进"。 */
+  padding: 0;
+  color: var(--text); /* 纯文本/未高亮时的字色;Shiki 高亮 span 自带行内色会自然覆盖,故此处不能用 !important */
+}
+/* 代码块内文字:去掉任何背景/阴影盒子,只保留卡片底色。
+   关键:不要再用 color !important —— 否则会盖掉 Shiki 语法高亮的行内颜色。 */
+.doc-scroll [data-content-type='codeBlock'] .bn-inline-content,
+.doc-scroll [data-content-type='codeBlock'] code,
+.doc-scroll [data-content-type='codeBlock'] pre {
+  background: transparent !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+/* 代码块悬浮复制按钮(.doc-area 的子元素,跟随悬停的代码块定位) */
+.doc-area {
+  position: relative;
+}
+.code-copy-float {
+  position: absolute;
+  z-index: 5;
+  transform: translateX(-100%);
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: var(--shadow-sm);
+}
+.code-copy-float:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* 引用 */
+.doc-scroll [data-content-type='quote'],
+.doc-scroll blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 14px;
+  color: var(--text-secondary);
+}
+
+/* 图片块自适应 */
+.doc-scroll .bn-visual-media,
+.doc-scroll img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+/* 列表缩进更紧凑 */
+.doc-scroll [data-content-type='bulletListItem'],
+.doc-scroll [data-content-type='numberedListItem'],
+.doc-scroll [data-content-type='checkListItem'] {
+  line-height: 1.7;
+}
+
+/* ===== 文档 + 目录栏布局 ===== */
+.doc-with-outline {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.doc-outline {
+  width: 220px;
+  flex: none;
+  border-right: 1px solid var(--border-light);
+  padding: 18px 8px 24px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.doc-outline-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  padding: 0 10px 8px;
+}
+.doc-outline-item {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.doc-outline-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.doc-outline-item.lv1 {
+  font-weight: 600;
+  color: var(--text);
+}
+.doc-outline-item.lv2 {
+  padding-left: 22px;
+}
+.doc-outline-item.lv3 {
+  padding-left: 34px;
+}
+.doc-outline-item.lv4,
+.doc-outline-item.lv5,
+.doc-outline-item.lv6 {
+  padding-left: 46px;
+  font-size: 12px;
+}
+
+/* ===== 斜杠 / 块菜单:飞书式 —— 隐藏描述与快捷键,行距舒适不拥挤 ===== */
+.bn-suggestion-menu {
+  max-height: 56vh;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 10px;
+  min-width: 200px;
+  max-width: 260px;
+  box-shadow: var(--shadow);
+}
+/* 隐藏描述副标题与右侧快捷键徽标 —— 飞书没有 */
+.bn-mt-suggestion-menu-item-subtitle {
+  display: none !important;
+}
+.bn-mt-suggestion-menu-item-section[data-position='right'] {
+  display: none !important;
+}
+/* 菜单项:单行、舒适行高 */
+.bn-suggestion-menu [role='option'] {
+  padding: 7px 10px !important;
+  border-radius: 8px;
+}
+/* 图标:去掉默认的深色方形底框,飞书是干净图标 */
+.bn-mt-suggestion-menu-item-section[data-position='left'] {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.bn-mt-suggestion-menu-item-title {
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+/* 分组标签 */
+.bn-suggestion-menu-label {
+  font-size: 11px !important;
+  color: var(--text-tertiary) !important;
+}
+
+/* ===== CodeMirror 宿主(代码/文本文件) ===== */
+.code-area {
+  padding: 0;
+}
+.code-editor-host {
+  height: 100%;
+}
+.code-editor-host .cm-editor {
+  height: 100%;
+}
+.code-editor-host .cm-scroller {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
+}

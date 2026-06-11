@@ -1042,3 +1042,106 @@ input:focus, select:focus, textarea:focus {
   border: 2px solid var(--bg-2);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+/* ============ Vditor (Markdown 即时渲染) ============ */
+.vditor-container {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* 让 Vditor 填满容器, 去掉默认边框圆角, 工具栏在上、内容区撑满可滚动 */
+.vditor-container .vditor {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  /* 用全应用的设计变量覆盖 Vditor 主题色, 使深/浅色一致 */
+  --textarea-background-color: var(--bg);
+  --textarea-text-color: var(--text);
+  --toolbar-background-color: var(--bg-2);
+  --toolbar-icon-color: var(--text-dim);
+  --toolbar-icon-hover-color: var(--text-bright);
+  --toolbar-divider-color: var(--border);
+  --border-color: var(--border);
+  --panel-background-color: var(--bg-2);
+  --panel-shadow: 0 1px 8px var(--shadow);
+  --code-background-color: var(--bg-2);
+  --blockquote-color: var(--text-dim);
+  --heading-border-color: var(--border);
+  --second-color: var(--selection);
+}
+
+.vditor-container .vditor-toolbar {
+  background-color: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.vditor-container .vditor-content {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* 编辑区字号跟随设置 */
+.vditor-container .vditor-reset {
+  font-size: var(--biji-md-font-size, 15px);
+  color: var(--text);
+}
+
+/* IR/SV/WYSIWYG 三种编辑面板背景与全应用一致 */
+.vditor-container .vditor-ir,
+.vditor-container .vditor-sv,
+.vditor-container .vditor-wysiwyg,
+.vditor-container .vditor-preview {
+  background: var(--bg);
+}
+
+/* ===== 代码块: 飞书风格打磨 ===== */
+/* 代码块整体: 圆角描边 + 柔和面板底色 + 留白(注意不要误伤 wysiwyg 根 pre.vditor-reset) */
+.vditor-container .vditor-wysiwyg__block,
+.vditor-container .vditor-ir__marker--pre + pre,
+.vditor-container .vditor-reset > pre:not(.vditor-reset) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  margin: 14px 0;
+  overflow: hidden;
+}
+.vditor-container .vditor-wysiwyg__block pre {
+  margin: 0 !important;
+  padding: 12px 14px;
+  background: transparent !important;
+}
+/* 代码内容透明, 让面板底色透出来(语法高亮 token 颜色仍由 hljs 主题提供) */
+.vditor-container .vditor-wysiwyg__block code.hljs,
+.vditor-container .vditor-reset pre > code.hljs {
+  background: transparent !important;
+}
+
+/* 行号: 加深颜色 + 右侧分隔线, 与代码留出间距 */
+.vditor-container .vditor-linenumber__rows {
+  border-right: 1px solid var(--border);
+}
+.vditor-container .vditor-linenumber__rows > span::before {
+  color: var(--text-dim);
+  padding-right: 1em;
+}
+
+/* 复制按钮配色跟随主题 */
+.vditor-container .vditor-copy svg {
+  color: var(--text-dim);
+}
+
+/* 隐藏左边距的 H1/H2/.../</> 等结构辅助小标记, 版面更接近飞书的纯净感 */
+.vditor-container .vditor-wysiwyg > .vditor-reset > h1:before,
+.vditor-container .vditor-wysiwyg > .vditor-reset > h2:before,
+.vditor-container .vditor-wysiwyg > .vditor-reset > h3:before,
+.vditor-container .vditor-wysiwyg > .vditor-reset > h4:before,
+.vditor-container .vditor-wysiwyg > .vditor-reset > h5:before,
+.vditor-container .vditor-wysiwyg > .vditor-reset > h6:before,
+.vditor-container .vditor-wysiwyg div.vditor-wysiwyg__block:before {
+  display: none !important;
+}

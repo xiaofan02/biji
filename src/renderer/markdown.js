@@ -29,14 +29,19 @@ export class MarkdownPreview {
 
   autoToggleByLang() {
     if (!this.currentTab) return;
-    if (this.currentTab.language === 'markdown' && !this.visible) {
-      this.show();
-    } else if (this.currentTab.language !== 'markdown' && this.visible) {
+    // markdown 已由 Vditor 所见即所得(wysiwyg)内联显示, 不再自动弹出右侧分屏预览;
+    // 非 markdown 文件若残留预览栏则收起
+    if (this.currentTab.language !== 'markdown' && this.visible) {
       this.hide();
     }
   }
 
   toggle() {
+    // markdown: 委托编辑器在 所见即所得(wysiwyg) <-> 源码分屏(sv) 之间切换
+    if (this.currentTab && this.currentTab.language === 'markdown') {
+      bus.emit('editor:toggle-md-mode');
+      return;
+    }
     if (this.visible) this.hide();
     else this.show();
   }

@@ -2,11 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http: file:; connect-src 'self' https: http: ws: wss:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http: file:; font-src 'self' data:; connect-src 'self' https: http: ws: wss:;">
   <title>笔记 Biji - 本地知识库</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/vs2015.css">
+  <link rel="stylesheet" href="../node_modules/vditor/dist/index.css">
 </head>
 <body>
   <div class="app">
@@ -69,6 +70,7 @@
               </div>
             </div>
             <div id="monacoContainer" class="monaco-container hidden"></div>
+            <div id="vditorContainer" class="vditor-container hidden"></div>
           </div>
           <div class="preview-resizer" data-target="preview"></div>
           <div class="preview-pane hidden" id="previewPane">
@@ -340,6 +342,10 @@
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+
+  <!-- Vditor 同样必须在 Monaco loader 之前加载:其 UMD 会检测 AMD define,
+       若在 Monaco loader 之后加载会走 AMD 分支而不挂载 window.Vditor -->
+  <script src="../node_modules/vditor/dist/index.min.js"></script>
 
   <!-- Monaco loader -->
   <script src="renderer/monaco-init.js"></script>
