@@ -7,7 +7,9 @@ function basename(p: string): string {
 function kindFor(p: string): Tab['kind'] {
   // 仅 .bnote(无损 JSON) 走飞书块编辑器;.md 暂回退到 CodeMirror 纯文本(无损),
   // 因为 BlockNote 的 markdown 序列化是有损的,直接往 .md 回写会逐次破坏内容
-  return /\.bnote$/i.test(p) ? 'bnote' : 'code'
+  if (/\.bnote$/i.test(p)) return 'bnote'
+  if (/\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(p)) return 'image' // 图片用查看器,而非 CodeMirror 读二进制(乱码)
+  return 'code'
 }
 
 interface TabsState {
@@ -51,12 +53,22 @@ export const useTabs = create<TabsState>((set, get) => ({
     set((s) => ({ tabs: s.tabs.map((t) => (t.path === path ? { ...t, modified } : t)) })),
 
   rename: (oldPath, newPath) =>
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
-        t.path === oldPath ? { ...t, path: newPath, name: basename(newPath), kind: kindFor(newPath) } : t
-      ),
-      activePath: s.activePath === oldPath ? newPath : s.activePath
-    })),
+    set((s) => {
+      // 同时处理"文件夹移动/重命名":其下已打开的子文档需整体改写路径前缀
+      const remap = (p: string) =>
+        p === oldPath
+          ? newPath
+          : p.startsWith(oldPath + '/') || p.startsWith(oldPath + '\\')
+            ? newPath + p.slice(oldPath.length)
+            : p
+      return {
+        tabs: s.tabs.map((t) => {
+          const np = remap(t.path)
+          return np === t.path ? t : { ...t, path: np, name: basename(np), kind: kindFor(np) }
+        }),
+        activePath: s.activePath ? remap(s.activePath) : s.activePath
+      }
+    }),
 
   activeTab: () => {
     const { tabs, activePath } = get()

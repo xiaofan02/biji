@@ -19,6 +19,7 @@ import { useTabs } from '@/store/useTabs'
 import { toast } from '@/store/useToast'
 import { debounce } from '@/lib/util'
 import { activeContent } from '@/lib/activeContent'
+import { shouldSkipSave } from '@/lib/saveGuard'
 import './editor.css'
 
 function langExt(path: string): Extension | null {
@@ -50,7 +51,7 @@ export function CodeEditor({ path }: { path: string }) {
     let disposed = false
 
     const persist = debounce(async () => {
-      if (!view) return
+      if (!view || shouldSkipSave(path)) return
       try {
         await ipc.fs.write(path, view.state.doc.toString())
         setModified(path, false)
@@ -86,7 +87,7 @@ export function CodeEditor({ path }: { path: string }) {
       viewRef.current = view
 
       const onSave = () => {
-        if (!view) return
+        if (!view || shouldSkipSave(path)) return
         ipc.fs
           .write(path, view.state.doc.toString())
           .then(() => setModified(path, false))

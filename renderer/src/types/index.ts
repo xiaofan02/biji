@@ -6,6 +6,10 @@ export interface TreeNode {
   path: string
   ext?: string
   children?: TreeNode[]
+  /** 服务器协同模式下的稳定文档 ID(= Yjs 房间名);本地模式为空 */
+  id?: string
+  /** 文档标题(服务器从 Y.Doc 提取回写,供树展示);本地模式为空 */
+  title?: string
 }
 
 export interface SearchResult {
@@ -43,6 +47,8 @@ export interface SSHHost {
   password?: string
   privateKeyPath?: string
   passphrase?: string
+  /** 会话管理器中的分组路径,用 / 分隔层级(如 "OnSemi/SZ03");空=根目录 */
+  group?: string
 }
 
 export interface TelnetHost {
@@ -50,6 +56,8 @@ export interface TelnetHost {
   name: string
   host: string
   port: number
+  /** 会话管理器中的分组路径,用 / 分隔层级(如 "OnSemi/SZ03");空=根目录 */
+  group?: string
 }
 
 export type Theme = 'light' | 'dark'
@@ -69,7 +77,22 @@ export interface BijiDoc {
 export interface Tab {
   path: string
   name: string
-  /** bnote = 飞书块文档; code = 代码/文本文件(CodeMirror) */
-  kind: 'bnote' | 'code'
+  /** bnote = 飞书块文档; code = 代码/文本文件(CodeMirror); image = 图片查看器 */
+  kind: 'bnote' | 'code' | 'image'
   modified: boolean
+}
+
+// 自动化工作流(v1):一串「命令步骤」,每步在指定主机执行一组命令并捕获输出。一键重跑、结果可存笔记。
+export interface WorkflowStep {
+  id: string
+  title: string
+  hostId: string // `${kind}:${host.id}` 引用 SSH/Telnet 主机
+  commands: string // 多行,每行一条命令
+}
+export interface Workflow {
+  id: string
+  name: string
+  steps: WorkflowStep[]
+  createdAt: number
+  updatedAt: number
 }

@@ -1,7 +1,8 @@
 import { useRef, useState, useMemo } from 'react'
-import { ipc } from '@/lib/ipc'
+import { api } from '@/lib/api'
 import { debounce } from '@/lib/util'
 import { useUI } from '@/store/useUI'
+import { usePanes } from '@/store/usePanes'
 import { useSettings } from '@/store/useSettings'
 import { useTabs } from '@/store/useTabs'
 import { useWorkspace } from '@/store/useWorkspace'
@@ -16,12 +17,12 @@ export function TopBar() {
   const toggleSidebar = useUI((s) => s.toggleSidebar)
   const toggleOutline = useUI((s) => s.toggleOutline)
   const outlineOpen = useUI((s) => s.outlineOpen)
-  const toggleRightPanel = useUI((s) => s.toggleRightPanel)
-  const rightPanel = useUI((s) => s.rightPanel)
+  const headingNumbers = useUI((s) => s.headingNumbers)
+  const toggleHeadingNumbers = useUI((s) => s.toggleHeadingNumbers)
+  const focusOrOpen = usePanes((s) => s.focusOrOpen)
   const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   const theme = useSettings((s) => s.theme)
   const setTheme = useSettings((s) => s.setTheme)
-  const workspace = useSettings((s) => s.workspace)
   const openTab = useTabs((s) => s.open)
   const refresh = useWorkspace((s) => s.refresh)
   const setActivePath = useWorkspace((s) => s.setActivePath)
@@ -38,7 +39,7 @@ export function TopBar() {
           setShowResults(false)
           return
         }
-        const r = (await ipc.fs.search(q.trim())) as SearchResult[]
+        const r = await api.search(q.trim())
         setResults(r)
         setShowResults(true)
       }, 250),
@@ -49,7 +50,7 @@ export function TopBar() {
     const name = await prompt('新建文档名称', '未命名文档')
     if (name === null) return
     try {
-      const path = await createDoc(workspace, name)
+      const path = await createDoc('', name)
       await refresh()
       openTab(path)
       setActivePath(path)
@@ -126,6 +127,13 @@ export function TopBar() {
         >
           <Icon name="list" />
         </button>
+        <button
+          className={`icon-btn${headingNumbers ? ' active' : ''}`}
+          title="标题自动编号"
+          onClick={toggleHeadingNumbers}
+        >
+          <Icon name="hash" />
+        </button>
         <button className="icon-btn" title="新建文档 (Ctrl+N)" onClick={onNewNote}>
           <Icon name="file-plus" />
         </button>
@@ -133,16 +141,16 @@ export function TopBar() {
           <Icon name="download" />
         </button>
         <button
-          className={`icon-btn${rightPanel === 'ai' ? ' active' : ''}`}
+          className="icon-btn"
           title="AI 助手 (Ctrl+I)"
-          onClick={() => toggleRightPanel('ai')}
+          onClick={() => focusOrOpen('ai')}
         >
           <Icon name="sparkles" />
         </button>
         <button
-          className={`icon-btn${rightPanel === 'terminal' ? ' active' : ''}`}
+          className="icon-btn"
           title="远程终端 (Ctrl+T)"
-          onClick={() => toggleRightPanel('terminal')}
+          onClick={() => focusOrOpen('terminal')}
         >
           <Icon name="terminal" />
         </button>

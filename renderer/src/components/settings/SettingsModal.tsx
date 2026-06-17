@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { ipc } from '@/lib/ipc'
-import { useUI } from '@/store/useUI'
+import { useUI, type HeadingNumberStyle } from '@/store/useUI'
 import { useSettings } from '@/store/useSettings'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useProviders } from '@/store/useProviders'
 import { toast } from '@/store/useToast'
+import { normalizeSSHHost } from '@/lib/hosts'
 import type { AIProvider, AIProviderType, SSHHost, TelnetHost } from '@/types'
 import './settings.css'
 
@@ -63,6 +64,8 @@ function GeneralPane() {
   const workspace = useSettings((s) => s.workspace)
   const setWorkspace = useSettings((s) => s.setWorkspace)
   const refresh = useWorkspace((s) => s.refresh)
+  const headingNumberStyle = useUI((s) => s.headingNumberStyle)
+  const setHeadingNumberStyle = useUI((s) => s.setHeadingNumberStyle)
 
   const changeWorkspace = async () => {
     const p = (await ipc.sys.chooseFolder()) as string | null
@@ -95,6 +98,20 @@ function GeneralPane() {
       <div className="form-group">
         <label>编辑器字号</label>
         <input type="number" min={12} max={28} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value) || 16)} />
+      </div>
+      <div className="form-group">
+        <label>标题编号格式</label>
+        <select
+          value={headingNumberStyle}
+          onChange={(e) => setHeadingNumberStyle(e.target.value as HeadingNumberStyle)}
+        >
+          <option value="arabic-dot">1. 2. 3.（数字带点）</option>
+          <option value="arabic">1 2 3（纯数字）</option>
+          <option value="paren">(1) (2) (3)</option>
+          <option value="cn">一、二、三、（中文）</option>
+          <option value="cn-paren">（一）（二）（三）</option>
+        </select>
+        <small>顶栏 # 按钮控制是否显示编号；多级标题如 1.1、一.二 按所选风格逐级转换</small>
       </div>
     </>
   )
@@ -218,7 +235,8 @@ const emptySSH = (): SSHHost => ({
   auth: 'password',
   password: '',
   privateKeyPath: '',
-  passphrase: ''
+  passphrase: '',
+  group: ''
 })
 
 function SSHPane() {
@@ -226,7 +244,7 @@ function SSHPane() {
   const [editing, setEditing] = useState<SSHHost | null>(null)
 
   useEffect(() => {
-    ipc.settings.get('sshHosts').then((h) => setHosts((h as SSHHost[]) || []))
+    ipc.settings.get('sshHosts').then((h) => setHosts(((h as any[]) || []).map(normalizeSSHHost)))
   }, [])
 
   const persist = async (list: SSHHost[]) => {
@@ -253,6 +271,7 @@ function SSHPane() {
     return (
       <div className="provider-editor">
         <div className="form-group"><label>名称</label><input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="生产服务器" /></div>
+        <div className="form-group"><label>分组(可选)</label><input value={editing.group || ''} onChange={(e) => setEditing({ ...editing, group: e.target.value })} placeholder="如 OnSemi/SZ03,用 / 分隔层级;留空=根目录" /></div>
         <div className="form-group"><label>主机 / IP</label><input value={editing.host} onChange={(e) => setEditing({ ...editing, host: e.target.value })} placeholder="192.168.1.10" /></div>
         <div className="form-group"><label>端口</label><input type="number" value={editing.port} onChange={(e) => setEditing({ ...editing, port: Number(e.target.value) || 22 })} /></div>
         <div className="form-group"><label>用户名</label><input value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} placeholder="root" /></div>
@@ -294,7 +313,7 @@ function SSHPane() {
           <div key={h.id} className="host-item">
             <div className="host-info">
               <div className="host-name">{h.name}</div>
-              <div className="host-sub">{h.username}@{h.host}:{h.port} · {h.auth === 'key' ? '私钥' : '密码'}</div>
+              <div className="host-sub">{h.username}@{h.host}:{h.port} · {h.auth === 'key' ? '私钥' : '密码'}{h.group ? ` · 📁 ${h.group}` : ''}</div>
             </div>
             <button className="btn" onClick={() => setEditing({ ...h })}>编辑</button>
             <button className="btn" onClick={() => persist(hosts.filter((x) => x.id !== h.id))}>删除</button>
@@ -305,7 +324,7 @@ function SSHPane() {
   )
 }
 
-const emptyTelnet = (): TelnetHost => ({ id: crypto.randomUUID(), name: '', host: '', port: 23 })
+const emptyTelnet = (): TelnetHost => ({ id: crypto.randomUUID(), name: '', host: '', port: 23, group: '' })
 
 function TelnetPane() {
   const [hosts, setHosts] = useState<TelnetHost[]>([])
@@ -334,6 +353,7 @@ function TelnetPane() {
     return (
       <div className="provider-editor">
         <div className="form-group"><label>名称</label><input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></div>
+        <div className="form-group"><label>分组(可选)</label><input value={editing.group || ''} onChange={(e) => setEditing({ ...editing, group: e.target.value })} placeholder="如 OnSemi/SZ03,用 / 分隔层级;留空=根目录" /></div>
         <div className="form-group"><label>主机 / IP</label><input value={editing.host} onChange={(e) => setEditing({ ...editing, host: e.target.value })} /></div>
         <div className="form-group"><label>端口</label><input type="number" value={editing.port} onChange={(e) => setEditing({ ...editing, port: Number(e.target.value) || 23 })} /></div>
         <div className="row gap">
@@ -356,7 +376,7 @@ function TelnetPane() {
           <div key={h.id} className="host-item">
             <div className="host-info">
               <div className="host-name">{h.name}</div>
-              <div className="host-sub">{h.host}:{h.port}</div>
+              <div className="host-sub">{h.host}:{h.port}{h.group ? ` · 📁 ${h.group}` : ''}</div>
             </div>
             <button className="btn" onClick={() => setEditing({ ...h })}>编辑</button>
             <button className="btn" onClick={() => persist(hosts.filter((x) => x.id !== h.id))}>删除</button>

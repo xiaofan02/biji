@@ -7,6 +7,12 @@ const api = {
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),
     all: () => ipcRenderer.invoke('settings:all')
   },
+  // 安全存储(登录令牌经 safeStorage 加密)
+  secure: {
+    get: (key: string) => ipcRenderer.invoke('secure:get', key) as Promise<string | null>,
+    set: (key: string, value: string) => ipcRenderer.invoke('secure:set', key, value) as Promise<boolean>,
+    clear: (key: string) => ipcRenderer.invoke('secure:clear', key) as Promise<boolean>
+  },
   fs: {
     list: (dir?: string) => ipcRenderer.invoke('fs:list', dir),
     read: (p: string) => ipcRenderer.invoke('fs:read', p),
@@ -17,6 +23,11 @@ const api = {
     workspace: () => ipcRenderer.invoke('fs:workspace'),
     search: (q: string) => ipcRenderer.invoke('fs:search', q),
     saveImage: (notePath: string, data: Uint8Array, ext: string) => ipcRenderer.invoke('fs:save-image', notePath, data, ext)
+  },
+  log: {
+    start: (id: string, suggestedName: string) => ipcRenderer.invoke('log:start', id, suggestedName),
+    append: (id: string, text: string) => ipcRenderer.invoke('log:append', id, text),
+    stop: (id: string) => ipcRenderer.invoke('log:stop', id)
   },
   ai: {
     chat: (payload: unknown) => ipcRenderer.invoke('ai:chat', payload),
@@ -42,6 +53,12 @@ const api = {
     connect: (cfg: unknown) => ipcRenderer.invoke('telnet:connect', cfg),
     write: (id: string, data: string) => ipcRenderer.invoke('telnet:write', id, data),
     close: (id: string) => ipcRenderer.invoke('telnet:close', id)
+  },
+  serial: {
+    list: () => ipcRenderer.invoke('serial:list'),
+    connect: (cfg: unknown) => ipcRenderer.invoke('serial:connect', cfg),
+    write: (id: string, data: string) => ipcRenderer.invoke('serial:write', id, data),
+    close: (id: string) => ipcRenderer.invoke('serial:close', id)
   },
   term: {
     onData: (id: string, cb: (data: string) => void) => {

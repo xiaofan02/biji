@@ -1,21 +1,34 @@
+import { useState } from 'react'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useUI } from '@/store/useUI'
 import { FileTree } from '@/components/tree/FileTree'
 import { Icon } from '@/components/common/Icon'
+import { Resizer } from '@/components/common/Resizer'
 
 export function Sidebar() {
   const collapsed = useUI((s) => s.sidebarCollapsed)
+  const sidebarWidth = useUI((s) => s.sidebarWidth)
+  const setSidebarWidth = useUI((s) => s.setSidebarWidth)
   const refresh = useWorkspace((s) => s.refresh)
+  const [spin, setSpin] = useState(false)
+  const onRefresh = () => {
+    setSpin(true)
+    void refresh()
+    window.setTimeout(() => setSpin(false), 600) // 至少转一圈(动画 0.6s)
+  }
 
   return (
-    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`} style={collapsed ? undefined : { width: sidebarWidth }}>
       <div className="sidebar-header">
         <span>资料库</span>
-        <button className="icon-btn small" title="刷新" onClick={() => refresh()}>
+        <button className={`icon-btn small${spin ? ' spinning' : ''}`} title="刷新" onClick={onRefresh}>
           <Icon name="refresh" size={15} />
         </button>
       </div>
       <FileTree />
+      {!collapsed && (
+        <Resizer dir={1} min={200} max={480} getWidth={() => useUI.getState().sidebarWidth} setWidth={setSidebarWidth} />
+      )}
     </aside>
   )
 }

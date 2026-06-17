@@ -4,14 +4,207 @@
   height: 100%;
   min-height: 0;
 }
-.term-toolbar {
+/* 主体:左会话管理器 + 右终端主区(横向分栏) */
+.term-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.term-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== 会话管理器(CRT 式左侧树) ===== */
+.term-manager {
+  width: 210px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-light);
+  background: var(--bg-sidebar);
+}
+.sm-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-light);
+  justify-content: space-between;
+  padding: 6px 6px 6px 12px;
+  flex: none;
 }
-.term-toolbar select {
+.sm-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.sm-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 6px;
+  padding: 0 8px;
+  height: 28px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-input);
+  color: var(--text-tertiary);
+}
+.sm-filter input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.sm-filter-clear {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+.sm-filter-clear:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.sm-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 6px 12px;
+}
+.sm-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-tertiary);
+}
+.sm-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding-right: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  user-select: none;
+}
+.sm-row:hover {
+  background: var(--bg-hover);
+}
+.sm-twisty {
+  width: 14px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: transform 0.12s;
+}
+.sm-twisty.open {
+  transform: rotate(90deg);
+}
+.sm-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--text-secondary);
+}
+.sm-folder .sm-icon {
+  color: var(--accent);
+}
+.sm-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sm-host-group {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.sm-host.connected .sm-label {
+  color: var(--accent);
+}
+.sm-conn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2ea35a;
+  flex: none;
+  margin-left: auto;
+}
+
+/* 会话记录按钮(位于会话栏):含 disc 图标,记录中(.logging)亮红并呼吸闪烁,提示正在落盘。
+   选择器带 .term-session-bar 前缀以稳压全局 .btn(等特异性时靠它取胜,不受样式表加载顺序影响) */
+.term-session-bar .term-log-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.term-session-bar .term-log-btn.logging {
+  color: #fff;
+  background: #e54545;
+  border-color: #e54545;
+}
+.term-session-bar .term-log-btn.logging :is(svg, circle) {
+  animation: term-rec-blink 1.4s ease-in-out infinite;
+}
+@keyframes term-rec-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+/* 会话栏「问 AI」按钮;host 撑满使按钮组靠右成组 */
+.term-session-bar .term-session-host {
+  flex: 1;
+  min-width: 0;
+}
+.term-session-bar .term-ask-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  margin-right: 8px;
+}
+/* 快速连接弹窗(Alt+Q) */
+.quick-connect-card {
+  width: 380px;
+  max-width: 92vw;
+}
+.qc-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.qc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.qc-row label {
+  width: 56px;
+  flex: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.qc-row select,
+.qc-row input {
   flex: 1;
   height: 30px;
   padding: 0 8px;
@@ -22,9 +215,20 @@
   font-size: 13px;
   outline: none;
 }
-.term-toolbar .btn {
-  height: 30px;
-  padding: 0 14px;
+.qc-row input:focus,
+.qc-row select:focus {
+  border-color: var(--accent);
+}
+.qc-hint {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.qc-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 20px 16px;
 }
 .term-host {
   flex: 1;
@@ -34,4 +238,142 @@
 }
 .term-host .xterm {
   height: 100%;
+}
+
+/* ===== 多会话标签 ===== */
+.term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-light);
+  overflow-x: auto;
+  flex: none;
+}
+.term-mgr-toggle {
+  flex: none;
+}
+.term-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  max-width: 180px;
+}
+.term-tab:hover {
+  background: var(--bg-hover);
+}
+.term-tab.active {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+.term-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-tab-close {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 1px;
+  border-radius: 3px;
+  opacity: 0.55;
+}
+.term-tab-close:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+
+/* 会话区:所有会话绝对堆叠;非活动用 visibility 隐藏(仍占尺寸,后台连接得以保活) */
+.term-sessions {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.term-session {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.term-session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-light);
+  flex: none;
+}
+.term-session-host {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.term-status {
+  margin-left: 4px;
+  font-size: 11px;
+}
+.term-status-connected {
+  color: #2ea35a;
+}
+.term-status-connecting {
+  color: var(--text-tertiary);
+}
+.term-status-closed {
+  color: #e54545;
+}
+.term-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* ===== 粘贴确认框(SecureCRT 风格) ===== */
+.paste-card {
+  width: 560px;
+  max-width: 92vw;
+}
+.paste-body {
+  padding: 14px 20px 4px;
+}
+.paste-body label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.paste-body textarea {
+  width: 100%;
+  height: 200px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  outline: none;
+}
+.paste-body textarea:focus {
+  border-color: var(--accent);
 }

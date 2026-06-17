@@ -1,5 +1,5 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
-import { join, dirname, extname } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage } from 'electron'
+import { join, dirname, extname, relative, isAbsolute } from 'path'
 import fs from 'fs'
 import fsp from 'fs/promises'
 import Store from 'electron-store'
@@ -19,11 +19,43 @@ const store = new Store({
     aiProviders: [],
     activeProvider: null,
     sshHosts: [],
-    telnetHosts: []
+    telnetHosts: [],
+    // 团队协同:服务器地址 + 上次登录用户名(令牌另经 safeStorage 加密存储,见 secure:* IPC)
+    serverUrl: '',
+    lastUsername: ''
   }
 }) as any
 
 let mainWindow: BrowserWindow | null = null
+
+// 团队协同:用户自有服务器可能用自签证书(IP 部署 + Caddy `tls internal`)。Electron/Chromium
+// 默认不信任自签证书,会以证书错误 / ERR_SSL_PROTOCOL_ERROR 掐断到服务器的 HTTPS/WSS 连接。
+// 这里只对"用户在登录页配置的那台服务器主机"放行证书错误,其它主机一律维持严格校验 —— 作用域
+// 受限,不做全局降级。日后换成域名 + Let's Encrypt 合法证书后,本不会触发 certificate-error,
+// 这段逻辑自然无副作用,可一直保留。
+function configuredServerHost(): string | null {
+  try {
+    const url = (store.get('serverUrl') as string) || ''
+    return url ? new URL(url).host : null // host 含非默认端口
+  } catch {
+    return null
+  }
+}
+app.on('certificate-error', (event, _webContents, url, _error, _certificate, callback) => {
+  let host = ''
+  try {
+    host = new URL(url).host
+  } catch {
+    /* 解析失败按不信任处理 */
+  }
+  const allowed = configuredServerHost()
+  if (allowed && host && host === allowed) {
+    event.preventDefault()
+    callback(true) // 信任本机配置的自有服务器的自签证书
+  } else {
+    callback(false) // 其它站点维持默认严格校验
+  }
+})
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -38,7 +70,11 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // dev 期渲染层由 http://localhost 提供,默认 webSecurity 会以"跨源"为由拦截本地 assets/ 图片
+      // (file://)的加载 → 图片显示不出来。开发期关闭即可正常显示;打包后渲染层本身就是 file:// 源
+      // (loadFile),与图片同源,不受影响,故仅在 dev 关闭。
+      webSecurity: !process.env['ELECTRON_RENDERER_URL']
     }
   })
 
@@ -171,6 +207,35 @@ ipcMain.handle('settings:set', (_e, key: string, value: unknown) => {
 })
 ipcMain.handle('settings:all', () => store.store)
 
+// ============ IPC: 安全存储(登录令牌)============
+// 用 Electron safeStorage 加密后存进 electron-store(key 加前缀 secure.)。
+// safeStorage 在某些 Linux 环境无可用密钥环 → 退化为明文 base64(仍可用,仅不加密),故吞掉异常。
+ipcMain.handle('secure:set', (_e, key: string, value: string) => {
+  try {
+    const enc = safeStorage.isEncryptionAvailable()
+      ? safeStorage.encryptString(value).toString('base64')
+      : Buffer.from(value, 'utf-8').toString('base64')
+    store.set(`secure.${key}`, enc)
+    return true
+  } catch {
+    return false
+  }
+})
+ipcMain.handle('secure:get', (_e, key: string) => {
+  const enc = store.get(`secure.${key}`) as string | undefined
+  if (!enc) return null
+  try {
+    const buf = Buffer.from(enc, 'base64')
+    return safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf-8')
+  } catch {
+    return null
+  }
+})
+ipcMain.handle('secure:clear', (_e, key: string) => {
+  store.delete(`secure.${key}`)
+  return true
+})
+
 // ============ IPC: File system / Notes ============
 interface TreeNode {
   type: 'dir' | 'file'
@@ -206,9 +271,63 @@ async function walkDir(dir: string): Promise<TreeNode[]> {
 
 ipcMain.handle('fs:list', async (_e, dirPath?: string) => walkDir(dirPath || (store.get('workspace') as string)))
 ipcMain.handle('fs:read', async (_e, filePath: string) => fsp.readFile(filePath, 'utf-8'))
+
+// 写前版本备份(尽力而为):覆盖工作区内已存在且非空的 .bnote 前,把旧内容留存到隐藏目录
+// <workspace>/.biji-history/<相对路径>/<时间戳>.bnote。每文件最多每 5 分钟留一份、滚动保留最近 30 份。
+// 这是"后悔药":即使护栏/原子写都失效,或用户自己误删误清空,也能从这里找回旧版本。
+// 目录以 . 开头,walkDir 会跳过,不污染资料库树。任何异常都吞掉,绝不阻断正常保存。
+async function backupBeforeOverwrite(filePath: string): Promise<void> {
+  try {
+    if (!/\.bnote$/i.test(filePath)) return
+    const workspace = store.get('workspace') as string
+    if (!workspace) return
+    const rel = relative(workspace, filePath)
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return // 仅备份工作区内的文档
+    let prev: string
+    try {
+      prev = await fsp.readFile(filePath, 'utf-8')
+    } catch {
+      return // 目标不存在(新建),没有旧版本可备份
+    }
+    if (!prev.trim()) return // 旧内容本就为空,不值得备份
+    const histDir = join(workspace, '.biji-history', rel.replace(/\.bnote$/i, ''))
+    const existing = (await fsp.readdir(histDir).catch(() => [] as string[]))
+      .filter((f) => f.endsWith('.bnote'))
+      .sort()
+    // 限频:最近一份在 5 分钟内则跳过,避免频繁自动保存把历史刷成秒级碎片
+    if (existing.length) {
+      const st = await fsp.stat(join(histDir, existing[existing.length - 1])).catch(() => null)
+      if (st && Date.now() - st.mtimeMs < 5 * 60 * 1000) return
+    }
+    await fsp.mkdir(histDir, { recursive: true })
+    const d = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    await fsp.writeFile(join(histDir, `${stamp}.bnote`), prev, 'utf-8')
+    // 滚动保留最近 30 份,删掉更旧的
+    const after = [...existing, `${stamp}.bnote`].sort()
+    for (let i = 0; i < after.length - 30; i++) {
+      await fsp.rm(join(histDir, after[i]), { force: true }).catch(() => {})
+    }
+  } catch {
+    /* 备份失败绝不影响正常保存 */
+  }
+}
+
 ipcMain.handle('fs:write', async (_e, filePath: string, content: string) => {
   await fsp.mkdir(dirname(filePath), { recursive: true })
-  await fsp.writeFile(filePath, content, 'utf-8')
+  await backupBeforeOverwrite(filePath) // 覆盖前留存旧版本(仅工作区内 .bnote),可在 .biji-history 里找回
+  // 原子写:先写临时文件,再 rename 覆盖目标。rename 同卷原子,杜绝写入中途崩溃/断电把目标
+  // 文件截断成半截坏 JSON —— 坏 JSON 会被 loadDoc 当作空文档,继而被自动保存用空内容覆盖,
+  // 造成"文件在、标题在、正文没了"的不可逆数据丢失。
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
+  try {
+    await fsp.writeFile(tmp, content, 'utf-8')
+    await fsp.rename(tmp, filePath)
+  } catch (e) {
+    await fsp.rm(tmp, { force: true }).catch(() => {})
+    throw e
+  }
   return true
 })
 ipcMain.handle('fs:create', async (_e, parent: string, name: string, isDir: boolean) => {
@@ -226,12 +345,97 @@ ipcMain.handle('fs:rename', async (_e, oldPath: string, newPath: string) => {
   return true
 })
 ipcMain.handle('fs:delete', async (_e, target: string) => {
-  const stat = await fsp.stat(target)
-  if (stat.isDirectory()) await fsp.rm(target, { recursive: true, force: true })
-  else await fsp.unlink(target)
+  // 移入系统回收站(可恢复),而非永久删除
+  await shell.trashItem(target)
   return true
 })
 ipcMain.handle('fs:workspace', () => store.get('workspace'))
+
+// ============ 串口(可选 native 模块 serialport) ============
+// ★用「拼接字符串 + eval-require」动态加载,使打包器不把 serialport 列为静态依赖;未安装 / 未为
+// Electron 重建(ABI 不匹配)时优雅降级(list 返回空、connect 抛友好错误),绝不影响主进程启动。
+let _SerialPort: any = undefined
+function loadSerialPort(): any {
+  if (_SerialPort !== undefined) return _SerialPort
+  try {
+    const name = 'serial' + 'port'
+    const mod = (0, eval)('require')(name)
+    _SerialPort = mod.SerialPort || mod
+  } catch {
+    _SerialPort = null
+  }
+  return _SerialPort
+}
+const serialSessions = new Map<string, any>()
+ipcMain.handle('serial:list', async () => {
+  const SP = loadSerialPort()
+  if (!SP) return []
+  try {
+    return await SP.list()
+  } catch {
+    return []
+  }
+})
+ipcMain.handle('serial:connect', async (_e, cfg: { path: string; baudRate?: number }) => {
+  const SP = loadSerialPort()
+  if (!SP)
+    throw new Error('串口模块未就绪:请先安装并为 Electron 重建 — npm i serialport 后 npx @electron/rebuild -f -w serialport')
+  const id = `serial-${process.pid}-${Date.now()}`
+  const port = new SP({ path: cfg.path, baudRate: cfg.baudRate || 9600 })
+  serialSessions.set(id, port)
+  port.on('data', (data: Buffer) => mainWindow?.webContents.send(`term:data:${id}`, data.toString('utf-8')))
+  port.on('error', (err: Error) => mainWindow?.webContents.send(`term:error:${id}`, err.message))
+  port.on('close', () => mainWindow?.webContents.send(`term:close:${id}`))
+  return { id }
+})
+ipcMain.handle('serial:write', (_e, id: string, data: string) => {
+  serialSessions.get(id)?.write(data)
+  return true
+})
+ipcMain.handle('serial:close', (_e, id: string) => {
+  const port = serialSessions.get(id)
+  if (port) {
+    try {
+      port.close()
+    } catch {
+      /* ignore */
+    }
+    serialSessions.delete(id)
+  }
+  return true
+})
+
+// ============ IPC: 终端会话记录 ============
+// 每个终端会话一个追加写入流(key=会话 id),渲染层把(去 ANSI 的)输出逐块发来落盘。
+const logStreams = new Map<string, fs.WriteStream>()
+ipcMain.handle('log:start', async (_e, id: string, suggestedName: string) => {
+  if (!mainWindow) return null
+  const r = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: suggestedName,
+    filters: [
+      { name: '日志文件', extensions: ['log', 'txt'] },
+      { name: '全部文件', extensions: ['*'] }
+    ]
+  })
+  if (r.canceled || !r.filePath) return null
+  logStreams.get(id)?.end()
+  const stream = fs.createWriteStream(r.filePath, { flags: 'a' })
+  stream.write(`\n===== 会话记录开始 ${new Date().toLocaleString()} =====\n`)
+  logStreams.set(id, stream)
+  return r.filePath
+})
+ipcMain.handle('log:append', (_e, id: string, text: string) => {
+  logStreams.get(id)?.write(text)
+  return true
+})
+ipcMain.handle('log:stop', (_e, id: string) => {
+  const s = logStreams.get(id)
+  if (s) {
+    s.end(`\n===== 会话记录结束 ${new Date().toLocaleString()} =====\n`)
+    logStreams.delete(id)
+  }
+  return true
+})
 
 // 保存图片到笔记同级 assets 目录,返回相对路径(用于文档内引用)
 ipcMain.handle('fs:save-image', async (_e, notePath: string, data: Uint8Array, ext: string) => {

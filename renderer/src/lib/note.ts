@@ -1,4 +1,4 @@
-import { ipc } from '@/lib/ipc'
+import { api } from '@/lib/api'
 import type { BijiDoc } from '@/types'
 
 export function emptyDoc(title = ''): BijiDoc {
@@ -14,22 +14,29 @@ export function emptyDoc(title = ''): BijiDoc {
   }
 }
 
-// 读取 .bnote;内容损坏或为空时回退为带标题的空文档
-export async function loadDoc(path: string): Promise<BijiDoc> {
-  const raw = await ipc.fs.read(path)
-  if (!raw || !raw.trim()) return emptyDoc(titleFromPath(path))
-  try {
-    const obj = JSON.parse(raw)
-    if (obj && obj.schema === 'biji-doc' && Array.isArray(obj.blocks)) return obj as BijiDoc
-  } catch {
-    /* 损坏则回退 */
+// 文档损坏/无法解析时抛出,供上层据此显示"已阻止打开以防覆盖",而不是静默清空
+export class DocCorruptError extends Error {
+  readonly corrupt = true
+  constructor(public readonly path: string) {
+    super('文档内容无法解析,可能已损坏')
+    this.name = 'DocCorruptError'
   }
-  return emptyDoc(titleFromPath(path))
+}
+
+// 读取文档正文(服务器协同库,虚拟路径)。区分两种"空":
+//   ① 节点尚无内容(新建后未写过)→ 安全回退为带标题的空文档;
+//   ② 有内容但结构不符 → 抛 DocCorruptError,绝不当空文档打开(否则自动保存会用空覆盖原内容)。
+// 服务器存的是 JSONB,基本不会出现旧版「半截坏 JSON」的情况;②保留为防御性兜底。
+export async function loadDoc(path: string): Promise<BijiDoc> {
+  const { doc } = await api.getDoc(path)
+  if (!doc) return emptyDoc(titleFromPath(path)) // ① 尚无内容
+  if (doc && (doc as any).schema === 'biji-doc' && Array.isArray((doc as any).blocks)) return doc
+  throw new DocCorruptError(path) // ② 结构不符
 }
 
 export async function saveDoc(path: string, doc: BijiDoc): Promise<void> {
   doc.updatedAt = Date.now()
-  await ipc.fs.write(path, JSON.stringify(doc, null, 2))
+  await api.putDoc(path, doc)
 }
 
 export function titleFromPath(path: string): string {
@@ -37,24 +44,17 @@ export function titleFromPath(path: string): string {
   return base.replace(/\.bnote$/i, '')
 }
 
-// 在指定目录(默认工作区根)新建一篇 .bnote 文档,返回完整路径
-export async function createDoc(dir: string, title: string): Promise<string> {
+// 在指定虚拟目录(根目录传 '')新建一篇 .bnote 文档,返回新文档的虚拟路径。
+// 节点先建好、内容暂为空;首次编辑时由 saveDoc(PUT /api/doc)写入正文。
+export async function createDoc(parent: string, title: string): Promise<string> {
   const safe = (title || '未命名文档').replace(/[\\/:*?"<>|]/g, '_').trim() || '未命名文档'
-  const fileName = `${safe}.bnote`
-  const fullPath = await ipc.fs.create(dir, fileName, false)
-  await saveDoc(fullPath, emptyDoc(safe))
-  return fullPath
+  const node = await api.createNode(parent, `${safe}.bnote`, 'file')
+  return node.path
 }
 
-// ============ 图片路径双向改写 ============
-// 存盘:图片绝对 file:// 地址 → 相对 assets/ 路径(保证 .bnote 可移植)
-// 显示:相对 assets/ 路径 → 绝对 file:// 地址(BlockNote 才能渲染本地图片)
-// 沿用旧 editor.js 中 _sanitizeImagePaths / _rewriteVditorImages 的思路
-
-function noteDirOf(notePath: string): string {
-  const norm = notePath.replace(/\\/g, '/')
-  return norm.slice(0, norm.lastIndexOf('/'))
-}
+// ============ 图片路径双向改写(服务器资源) ============
+// 服务器托管图片(/api/assets/<id>),多人才都能看到。文档里存相对地址(可移植);
+// 渲染时拼成服务器绝对地址供 <img> 加载。外链(http/data/blob)一律原样保留。
 
 // 递归遍历所有块(含 children),对带 props.url 的块应用改写
 function mapBlockUrls(blocks: any[], fn: (url: string) => string): any[] {
@@ -70,26 +70,15 @@ function mapBlockUrls(blocks: any[], fn: (url: string) => string): any[] {
   })
 }
 
-function toFileUrl(absPath: string): string {
-  const p = absPath.replace(/\\/g, '/')
-  return 'file://' + (p.startsWith('/') ? p : '/' + p)
-}
-
-// 显示用:相对路径 → file://绝对;外链(http/data/blob/file)原样保留
-export function blocksForDisplay(blocks: any[], notePath: string): any[] {
-  const dir = noteDirOf(notePath)
+// 显示用:相对 /api/assets/.. → 服务器绝对地址;外链原样保留。
+export function blocksForDisplay(blocks: any[], _notePath: string): any[] {
   return mapBlockUrls(blocks, (url) => {
-    if (/^(https?:|data:|blob:|file:|\/\/)/i.test(url)) return url
-    const rel = url.replace(/^\.\//, '').replace(/\\/g, '/')
-    const isAbs = rel.startsWith('/') || /^[a-zA-Z]:\//.test(rel)
-    return toFileUrl(isAbs ? rel : `${dir}/${rel}`)
+    if (/^(https?:|data:|blob:)/i.test(url)) return url
+    return api.assetUrl(url)
   })
 }
 
-// 存盘用:file://…/assets/x → assets/x;其余原样保留
+// 存盘用:服务器绝对图片地址 → 相对 /api/assets/..(换域名/反代也可用);其余原样保留。
 export function blocksForStorage(blocks: any[], _notePath: string): any[] {
-  return mapBlockUrls(blocks, (url) =>
-    url.replace(/^file:\/\/.*?\/(assets\/[^?#]+).*$/i, '$1')
-  )
+  return mapBlockUrls(blocks, (url) => url.replace(/^https?:\/\/[^/]+(\/api\/assets\/)/i, '$1'))
 }
-

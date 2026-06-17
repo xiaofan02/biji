@@ -1,18 +1,186 @@
 /* ===== 应用整体布局 ===== */
 .app {
-  display: grid;
-  grid-template-rows: 48px 1fr;
-  grid-template-columns: auto 1fr auto;
-  grid-template-areas:
-    'topbar topbar topbar'
-    'sidebar main right';
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  overflow: hidden;
+}
+
+/* ===== 工作区:活动栏 + 侧栏 + 分屏网格 ===== */
+.workbench {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.activity-bar {
+  flex: none;
+  width: 52px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+}
+.activity-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  color: var(--text-tertiary);
+  transition: background 0.12s, color 0.12s;
+}
+.activity-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.activity-item.active {
+  color: var(--accent);
+}
+.activity-item.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+/* ===== 分屏网格 ===== */
+.pane-grid {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative; /* 作为 .pane.maximized 绝对定位的包含块 */
+}
+/* 最大化:铺满整个工作区,盖住其余面板(其余面板仍挂载不卸载,故 SSH/会话不断) */
+.pane.maximized {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+}
+.split {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.split-row {
+  flex-direction: row;
+}
+.split-col {
+  flex-direction: column;
+}
+.split-cell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.split-divider {
+  flex: none;
+  position: relative;
+  z-index: 5;
+}
+.split-divider-row {
+  width: 6px;
+  cursor: col-resize;
+}
+.split-divider-col {
+  height: 6px;
+  cursor: row-resize;
+}
+.split-divider::after {
+  content: '';
+  position: absolute;
+  background: var(--border-light);
+  transition: background 0.12s;
+}
+.split-divider-row::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+.split-divider-col::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+}
+.split-divider:hover::after {
+  background: var(--accent);
+}
+
+/* ===== 单个面板 ===== */
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.pane-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  border-bottom: 1px solid var(--border-light);
+}
+.pane-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.pane-header .tabs {
+  flex: 1;
+  height: 100%;
+  border-bottom: none;
+}
+.pane-title-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.pane-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+.pane-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
 /* ===== 顶栏 ===== */
 .topbar {
-  grid-area: topbar;
+  flex: none;
+  height: 48px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -38,7 +206,7 @@
 .topbar .actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   -webkit-app-region: no-drag;
 }
 
@@ -63,6 +231,15 @@
 .icon-btn.active {
   background: var(--accent-soft);
   color: var(--accent);
+}
+/* 刷新等按钮点击转一圈反馈(给按钮加 .spinning,0.6s 后移除) */
+@keyframes spin-once {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.icon-btn.spinning svg {
+  animation: spin-once 0.6s ease;
 }
 .icon-btn.small {
   width: 26px;
@@ -136,13 +313,14 @@
 
 /* ===== 侧栏 ===== */
 .sidebar {
-  grid-area: sidebar;
+  flex: none;
   width: 260px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   transition: width 0.16s ease, opacity 0.16s ease;
 }
 .sidebar.collapsed {
@@ -158,12 +336,12 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
-  letter-spacing: 0.5px;
 }
 .file-tree {
   flex: 1;
   overflow-y: auto;
   padding: 4px 8px 16px;
+  outline: none; /* 容器可聚焦(键盘导航),但不显示默认焦点框,由 active 行高亮充当光标 */
 }
 
 /* ===== 文件树节点 ===== */
@@ -186,8 +364,14 @@
   background: var(--bg-hover);
 }
 .tree-row.active {
-  background: var(--bg-active);
-  color: var(--accent);
+  background: var(--bg-selected);
+  color: var(--text);
+  font-weight: 500;
+}
+/* 拖拽落点高亮:用 accent 描边 + 浅底,作为短暂的"放这里"提示 */
+.tree-row.drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 .tree-row .twisty {
   width: 16px;
@@ -200,12 +384,9 @@
 .tree-row .icon {
   display: inline-flex;
   align-items: center;
+  margin-right: 4px;
   color: var(--text-secondary);
   flex: none;
-}
-.tree-row.active .twisty,
-.tree-row.active .icon {
-  color: var(--accent);
 }
 .tree-row .label {
   overflow: hidden;
@@ -290,7 +471,7 @@
 .doc-scroll {
   max-width: var(--doc-max-width);
   margin: 0 auto;
-  padding: 56px 48px 240px;
+  padding: 48px clamp(28px, 6%, 60px) 200px;
 }
 .doc-title-input {
   width: 100%;
@@ -326,21 +507,48 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
   color: var(--text-tertiary);
+  user-select: none;
+  animation: empty-in 0.32s ease;
 }
-.empty-state .empty-logo {
-  font-size: 56px;
+.empty-state .empty-badge {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: 22px;
 }
 .empty-state h2 {
   margin: 0;
-  color: var(--text-secondary);
+  font-size: 20px;
   font-weight: 600;
+  color: var(--text);
+}
+.empty-state p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
 }
 .empty-actions {
   display: flex;
   gap: 12px;
-  margin-top: 8px;
+  margin-top: 24px;
+}
+.empty-state .empty-hint {
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  opacity: 0.85;
+}
+@keyframes empty-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 /* ===== 按钮 ===== */
@@ -369,9 +577,19 @@
 .btn.primary:hover {
   background: var(--accent-hover);
 }
+.btn.danger {
+  background: #f76964;
+  border-color: #f76964;
+  color: #fff;
+}
+.btn.danger:hover {
+  background: #e5534e;
+  border-color: #e5534e;
+}
 
 /* ===== 状态栏 ===== */
 .status-bar {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -385,6 +603,23 @@
 .status-bar .spacer {
   flex: 1;
 }
+/* 未保存指示:与标签页一致的 accent 小圆点 */
+.status-modified {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.status-modified .dot-accent {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+.status-saved {
+  color: var(--text-tertiary);
+}
 
 /* ===== 右侧面板 ===== */
 .right-panel {
@@ -395,6 +630,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 .panel-tabs {
   display: flex;
@@ -482,6 +718,48 @@
   font-size: 13px;
   padding: 24px;
   text-align: center;
+}
+
+/* ===== 面板拖拽分隔条 ===== */
+.resizer {
+  position: absolute;
+  top: 0;
+  width: 7px;
+  height: 100%;
+  z-index: 20;
+  cursor: col-resize;
+}
+.resizer-right {
+  right: -3px;
+}
+.resizer-left {
+  left: -3px;
+}
+/* 悬停/拖拽时在中线显示一条 accent 细线作为可拖拽提示 */
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background 0.12s;
+}
+.resizer:hover::after,
+body.resizing .resizer:hover::after {
+  background: var(--accent);
+}
+body.resizing {
+  cursor: col-resize;
+}
+body.resizing .sidebar,
+body.resizing .right-panel {
+  transition: none;
+}
+body.resizing * {
+  user-select: none;
 }
 
 /* ===== 右键上下文菜单 ===== */
@@ -577,6 +855,11 @@
 .modal-body {
   padding: 20px;
 }
+.confirm-message {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
 .form-group {
   margin-bottom: 16px;
 }
@@ -619,4 +902,41 @@
 }
 .prompt-input:focus {
   border-color: var(--accent);
+}
+
+/* ===== 移动到… 弹窗的文件夹列表 ===== */
+.move-list {
+  max-height: 52vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+}
+.move-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+.move-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.move-item:disabled {
+  color: var(--text-tertiary);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.move-item svg {
+  color: var(--text-secondary);
+  flex: none;
 }

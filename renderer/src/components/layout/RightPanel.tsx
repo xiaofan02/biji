@@ -2,16 +2,20 @@ import { useUI } from '@/store/useUI'
 import { AIChat } from '@/components/ai/AIChat'
 import { TerminalPanel } from '@/components/terminal/TerminalPanel'
 import { Icon } from '@/components/common/Icon'
+import { Resizer } from '@/components/common/Resizer'
 
 export function RightPanel() {
   const rightPanel = useUI((s) => s.rightPanel)
+  const rightPanelWidth = useUI((s) => s.rightPanelWidth)
+  const setRightPanelWidth = useUI((s) => s.setRightPanelWidth)
   const toggleRightPanel = useUI((s) => s.toggleRightPanel)
   const closeRightPanel = useUI((s) => s.closeRightPanel)
 
   if (!rightPanel) return null
 
   return (
-    <aside className="right-panel">
+    <aside className="right-panel" style={{ width: rightPanelWidth }}>
+      <Resizer dir={-1} min={300} max={680} getWidth={() => useUI.getState().rightPanelWidth} setWidth={setRightPanelWidth} />
       <div className="panel-tabs">
         <button
           className={`panel-tab${rightPanel === 'ai' ? ' active' : ''}`}

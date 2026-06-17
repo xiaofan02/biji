@@ -31,7 +31,7 @@
 
 /* 块间距:飞书式宽松呼吸感 */
 .doc-scroll .bn-block-outer:not(:first-child) {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .doc-scroll .bn-block-content {
   padding-block: 3px;
@@ -130,13 +130,20 @@
   color: var(--text);
   background: var(--bg-elevated);
 }
-/* pre / code:顶部条之下;横向滚动;所有行左对齐(显式归零,消除首行视觉缩进) */
+/* pre / code:顶部条之下;横向滚动;所有行左对齐(显式归零,消除首行视觉缩进)。
+   左侧留出 60px 给行号槽(.code-gutter,见 DocEditor):槽宽 52px,其后留 8px 间隙再到代码。
+   关键:pre 必须显式设与 code 一致的 font-size/line-height —— 否则 pre 会以正文 16px×1.75≈28px
+   的"行盒撑高"(strut)决定每行实际高度,而 code 文本只有 13.5px×1.7≈23px,行号槽按 23px 排布
+   就会逐行往上漂(累计偏移)。让 pre 的 strut 等于 code 行高,行盒高度=代码行高,行号即可逐行对齐。 */
 .doc-scroll [data-content-type='codeBlock'] pre {
-  padding: 12px 16px;
+  padding: 12px 16px 12px 50px;
   margin: 0;
   overflow-x: auto;
   white-space: pre;
   text-indent: 0;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
 }
 .doc-scroll [data-content-type='codeBlock'] code {
   font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
@@ -157,6 +164,12 @@
   background: transparent !important;
   box-shadow: none !important;
   text-shadow: none !important;
+  /* 飞书式:代码一律不软换行,一行太长就横向滚动 → 每个逻辑行永远只占一个视觉行,
+     行号槽(按逻辑行数×行高排布)才不会因折行而错位/丢号(用户截图里第 9 行折行后号就乱了)。
+     BlockNote 的 .bn-inline-content 默认 pre-wrap 会软换行,这里强制 pre 覆盖。 */
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
 }
 /* 代码块悬浮复制按钮(.doc-area 的子元素,跟随悬停的代码块定位) */
 .doc-area {
@@ -186,6 +199,26 @@
   color: var(--text);
 }
 
+/* 代码块行号槽:.doc-area 的绝对定位子层(随内容滚动),与代码同 line-height/padding-top 逐行对齐。
+   宽 52px,右侧 border 作为与代码的分割线;pre 的 padding-left:60px 在分割线后再留 8px 间隙。
+   不拦截鼠标(pointer-events:none),右对齐贴近分割线。height 由 JS 设为 pre 实测高度,使分割线贯穿整块。 */
+.code-gutter {
+  position: absolute;
+  width: 42px;
+  box-sizing: border-box;
+  text-align: center;
+  color: var(--text-tertiary);
+  /* 不透明底(与代码块同色):横向滚动时盖住滑过来的代码,行号列始终清晰,贴近飞书固定行号列 */
+  background: var(--bg-input);
+  border-right: 1px solid var(--border);
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
+}
+.code-gutter span {
+  display: block;
+}
+
 /* 引用 */
 .doc-scroll [data-content-type='quote'],
 .doc-scroll blockquote {
@@ -201,11 +234,69 @@
   border-radius: 8px;
 }
 
+/* 可标色代码框(codeNote 块):等宽 + 代码框外观,内容支持选中标色(无 Shiki 高亮) */
+.doc-scroll .biji-codenote {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 图片查看器(在资料库点开图片文件时,DocArea 用它而非 CodeMirror) */
+.image-area {  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 24px;
+}
+.image-viewer-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.18);
+}
+
 /* 列表缩进更紧凑 */
 .doc-scroll [data-content-type='bulletListItem'],
 .doc-scroll [data-content-type='numberedListItem'],
 .doc-scroll [data-content-type='checkListItem'] {
   line-height: 1.7;
+}
+
+/* ===== 有序列表编号:用 BlockNote 默认(data-index) =====
+   BlockNote 自带列表编号(JS 维护 data-index):连续的有序项递增,被任何非列表块(标题/段落/代码块)打断
+   即视为新列表、从 1 重排 —— 这正好满足"每个主标题下的有序列表从 1 开始"。
+   之前用 CSS counter(bn-ol) 覆盖成"全局连续",反而让标题下不归零(用户报"还是没从 1 开始"),
+   且 counter-reset 在 BlockNote 的 outer/嵌套 group 结构下作用域不可靠;故移除覆盖,回退默认行为。 */
+
+/* ===== 标题自动多级编号(.doc-scroll.numbered 时启用,顶栏 # 开关) =====
+   编号由 JS 按"文档实际出现的标题层级"归一(DocEditor computeHeadingNumbers,第一个标题无论几级=1),
+   再由 HeadingNumbers 叠加层(绝对定位、只读标题位置)在标题左侧 padding 区显示。
+   ★ 不写 ProseMirror 的 DOM —— 之前写标题元素的 --hn inline 样式会被 PM 重渲染清除(=正文无序号),诊断已证实。
+   这里只给标题留出左侧编号位;编号本体的字号/位置由叠加层按各标题实测设置。 */
+.doc-scroll.numbered .bn-block-content[data-content-type='heading'] {
+  padding-left: 2em;
+}
+.heading-num {
+  position: absolute;
+  box-sizing: border-box;
+  padding-right: 0.45em;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
 }
 
 /* ===== 文档 + 目录栏布局 ===== */
@@ -243,6 +334,11 @@
 .doc-outline-item:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+/* 目录里的编号:跟随目录项颜色(不灰),与正文标题编号一致 */
+.doc-outline-num {
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
 }
 .doc-outline-item.lv1 {
   font-weight: 600;

@@ -9,7 +9,15 @@ export function StatusBar() {
     <div className="status-bar">
       <span>{active ? active.path : '就绪'}</span>
       {active && <span>{active.kind === 'bnote' ? '飞书文档' : '代码'}</span>}
-      {active?.modified && <span>● 未保存</span>}
+      {active &&
+        (active.modified ? (
+          <span className="status-modified">
+            <span className="dot-accent" />
+            保存中…
+          </span>
+        ) : (
+          <span className="status-saved">已保存</span>
+        ))}
       <span className="spacer" />
       <span title={workspace}>工作区</span>
       <span>UTF-8</span>
