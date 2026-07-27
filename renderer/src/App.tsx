@@ -7,9 +7,8 @@ import { useProviders } from '@/store/useProviders'
 import { usePanes } from '@/store/usePanes'
 import { useAuth } from '@/store/useAuth'
 import { ipc } from '@/lib/ipc'
-import { createDoc } from '@/lib/note'
+import { newDocFlow } from '@/lib/fileOps'
 import { normalizeSSHHost, sshHostsNeedMigration } from '@/lib/hosts'
-import { toast } from '@/store/useToast'
 import { TopBar } from '@/components/layout/TopBar'
 import { ActivityBar } from '@/components/layout/ActivityBar'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -22,33 +21,18 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { MoveDialog } from '@/components/common/MoveDialog'
 import { ContextMenu } from '@/components/common/ContextMenu'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
-import { prompt } from '@/store/usePrompt'
 import { QuickConnect } from '@/components/terminal/QuickConnect'
 import { useQuickConnect } from '@/store/useQuickConnect'
 import { LoginScreen } from '@/components/auth/LoginScreen'
 
-async function newNoteFlow() {
-  const name = await prompt('新建文档名称', '未命名文档')
-  if (name === null) return
-  try {
-    const path = await createDoc('', name)
-    await useWorkspace.getState().refresh()
-    useTabs.getState().open(path)
-    useWorkspace.getState().setActivePath(path)
-  } catch (e) {
-    toast('新建失败:' + (e as Error).message, 'error')
-  }
-}
-
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
   const loaded = useSettings((s) => s.loaded)
-  const authStatus = useAuth((s) => s.status)
 
-  // 初始化:加载设置 + 刷新工作区 + 加载 AI 服务商
+  // 初始化:加载设置 + 刷新工作区(本地磁盘)+ 加载 AI 服务商
   useEffect(() => {
     useSettings.getState().init()
-    useAuth.getState().init() // 团队协同:校验已存登录令牌,决定显示登录页还是主界面
+    useAuth.getState().init() // 后台校验已存登录令牌(仅供同步/协同用);不阻塞本地界面
     useWorkspace.getState().refresh()
     useProviders.getState().init()
     // 迁移旧版 SSH 主机字段(authMethod→auth, keyPath→privateKeyPath),否则连接时密码取不到 → "No authentication methods available"
@@ -65,10 +49,13 @@ export default function App() {
     document.documentElement.style.setProperty('--editor-font-size', fontSize + 'px')
   }, [fontSize])
 
+  // 本地优先:数据源永远是本机磁盘,登录/登出不再切换数据源或清空标签。
+  // (登录仅用于身份 + 云端同步叠加层,见 lib/sync.ts。)
+
   // 菜单事件订阅
   useEffect(() => {
     const offs = [
-      ipc.menu.on('menu:new-note', () => newNoteFlow()),
+      ipc.menu.on('menu:new-note', () => newDocFlow('')),
       ipc.menu.on('menu:save', () => window.dispatchEvent(new CustomEvent('biji:save'))),
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
       ipc.menu.on('menu:toggle-ai', () => usePanes.getState().focusOrOpen('ai')),
@@ -124,11 +111,8 @@ export default function App() {
     return () => window.removeEventListener('error', onErr)
   }, [])
 
-  if (!loaded || authStatus === 'loading') {
+  if (!loaded) {
     return <div className="placeholder-pane" style={{ height: '100vh' }}>加载中…</div>
-  }
-  if (authStatus === 'out') {
-    return <LoginScreen />
   }
 
   return (
@@ -146,6 +130,7 @@ export default function App() {
       </div>
       <SettingsModal />
       <QuickConnect />
+      <LoginScreen />
       <PromptDialog />
       <ConfirmDialog />
       <MoveDialog />

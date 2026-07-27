@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo } from 'react'
-import { api } from '@/lib/api'
+import { ipc } from '@/lib/ipc'
 import { debounce } from '@/lib/util'
 import { useUI } from '@/store/useUI'
 import { usePanes } from '@/store/usePanes'
@@ -39,7 +39,7 @@ export function TopBar() {
           setShowResults(false)
           return
         }
-        const r = await api.search(q.trim())
+        const r = (await ipc.fs.search(q.trim())) as SearchResult[]
         setResults(r)
         setShowResults(true)
       }, 250),

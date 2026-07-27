@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
@@ -8,10 +8,10 @@ import './editor.css'
 
 import type { BijiDoc } from '@/types'
 import { ipc } from '@/lib/ipc'
-import { api } from '@/lib/api'
 import { bijiSchema } from '@/lib/blocknote'
-import { blocksForDisplay, blocksForStorage, titleFromPath } from '@/lib/note'
-import { openCollab } from '@/lib/collab'
+import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc, fileUrlFor } from '@/lib/note'
+import { pushDoc } from '@/lib/sync'
+import { shouldSkipSave } from '@/lib/saveGuard'
 import { activeContent } from '@/lib/activeContent'
 import { useAuth } from '@/store/useAuth'
 import { useSettings } from '@/store/useSettings'
@@ -117,8 +117,8 @@ function isBlocksEmpty(blocks: any[]): boolean {
 export type DocSource = { type: 'bnote'; doc: BijiDoc } | { type: 'markdown'; text: string }
 
 // 单篇文档的 BlockNote 编辑器(飞书块编辑)。由 DocArea 按 path 作为 key 挂载,切换文档即重建。
-// 支持两种存储:.bnote(JSON,带独立标题) 与 markdown(.md,标题即内容里的首个 H1)。
-export function DocEditor({ path, docId, seed }: { path: string; docId: string; seed: BijiDoc | null }) {
+// 本地文件模式:正文来自本地 .bnote(seed),改动防抖落盘(ipc.fs.write,内含原子写 + .biji-history)。
+export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   const theme = useSettings((s) => s.theme)
   const setModified = useTabs((s) => s.setModified)
   const user = useAuth((s) => s.user)
@@ -128,43 +128,65 @@ export function DocEditor({ path, docId, seed }: { path: string; docId: string; 
   const [headings, setHeadings] = useState<Heading[]>([])
   const docAreaRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
-  const seededRef = useRef(false)
 
-  // 协同会话(Y.Doc + provider + indexeddb),按 docId 建一次,卸载时销毁。
-  const session = useMemo(() => openCollab(docId), [docId])
-  useEffect(() => () => session.destroy(), [session])
-
-  // 标题:共享 Y.Text(服务器 onStoreDocument 读它回写 nodes.title)。受控输入 ↔ Y.Text,远端改动也实时反映。
-  const [title, setTitle] = useState(() => session.title.toString())
+  // 标题:存进 BijiDoc.title(受控输入)。
+  const [title, setTitle] = useState(seed.title || '')
   const titleRef = useRef(title)
   titleRef.current = title
-  useEffect(() => {
-    const t = session.title
-    const sync = () => setTitle(t.toString())
-    t.observe(sync)
-    sync()
-    return () => t.unobserve(sync)
-  }, [session])
+  const [updatedAt, setUpdatedAt] = useState<number>(seed.updatedAt || Date.now())
+  const dirtyRef = useRef(false) // 有未落盘改动
+  // 加载时是否本就有正文:空内容护栏据此判断"自动保存写空"是否可疑
+  const seedNonEmpty = useMemo(() => !isBlocksEmpty((seed.blocks as any[]) || []), [seed])
 
   const editor = useCreateBlockNote(
     {
-      schema: bijiSchema, // 飞书式 schema:代码块带 Shiki 语法高亮(各客户端一致即可)
+      schema: bijiSchema, // 飞书式 schema:代码块带 Shiki 语法高亮
       dictionary: zh, // 斜杠菜单/占位符/工具栏中文化
       domAttributes: { editor: { spellcheck: 'false', class: 'biji-bn-editor' } },
-      // 协同模式:正文绑定到 Y.Doc 的 XML 片段,不传 initialContent(内容来自 Y.Doc)。
-      collaboration: {
-        fragment: session.fragment,
-        user: { name: user?.name || '我', color: user?.color || '#3370ff' },
-        provider: { awareness: session.provider.awareness ?? undefined }
-      },
+      // 本地模式:用文件里的 blocks 作为初始内容(空文档传 undefined,BlockNote 自带一个空段落)。
+      initialContent:
+        seed.blocks && (seed.blocks as any[]).length ? (blocksForDisplay(seed.blocks as any[], path) as any) : undefined,
       uploadFile: async (file: File) => {
-        // 图片上传到服务器(全队同服务器,存绝对地址即可显示;导出时由 blocksForStorage 转回相对)
-        const up = await api.uploadImage(file, file.name || 'image', docId)
-        return api.assetUrl(up.path)
+        // 图片存到笔记同级 assets/ 下,文档里存相对 assets/xxx(blocksForStorage 落盘时改写),返回 file:// 即时显示
+        const buf = new Uint8Array(await file.arrayBuffer())
+        const ext = file.name.split('.').pop() || 'png'
+        const { fullPath } = await ipc.fs.saveImage(path, buf, ext)
+        return fileUrlFor(fullPath)
       }
     },
-    [session]
+    []
   )
+
+  // 落盘:把当前正文 + 标题写回本地 .bnote。force=显式保存(Ctrl+S/失焦/卸载),绕过空内容护栏。
+  const saveNow = useCallback(
+    async (force = false) => {
+      if (shouldSkipSave(path)) return // 移动/删除/重命名进行中:别把内容写回旧路径(防幽灵文件复活)
+      const blocks = blocksForStorage(editor.document as any[], path)
+      // 空内容护栏:本来有内容的文档,自动保存绝不写成空(防加载/渲染异常清空原文);显式保存才放行
+      if (!force && isBlocksEmpty(blocks) && seedNonEmpty) return
+      const now = Date.now()
+      const doc: BijiDoc = {
+        schema: 'biji-doc',
+        version: 1,
+        id: seed.id || crypto.randomUUID(),
+        title: titleRef.current,
+        createdAt: seed.createdAt || now,
+        updatedAt: now,
+        blocks
+      }
+      try {
+        await saveDoc(path, doc)
+        dirtyRef.current = false
+        setModified(path, false)
+        setUpdatedAt(now)
+        pushDoc(path, doc) // 本地已落盘 → 尽力异步推送到云端(未登录/服务器不可达则内部 no-op)
+      } catch (e) {
+        toast('保存失败:' + (e as Error).message, 'error')
+      }
+    },
+    [editor, path, seed, seedNonEmpty, setModified]
+  )
+  const autosave = useMemo(() => debounce(() => void saveNow(false), 600), [saveNow])
 
   // 目录 + 标题编号(归一多级编号,第一个标题无论几级=1)。只 setHeadings,正文用 HeadingNumbers 叠加层。
   // ★ 编号绝不写进 ProseMirror 管理的 DOM(会被 PM 重渲染清除)。组字期间跳过,compositionend 后补跑。
@@ -194,44 +216,20 @@ export function DocEditor({ path, docId, seed }: { path: string; docId: string; 
     [editor, path]
   )
 
-  // 协同下"已保存"指示:本地一改即标记 modified,稍后(Hocuspocus 约 2s 防抖持久化)回落为已保存。
-  // 这是乐观提示;真正的持久化/防丢由 CRDT + 服务器事务 + y-indexeddb 保证(协同文档无本地保存链)。
-  const markSaved = useMemo(() => debounce(() => setModified(path, false), 1500), [path, setModified])
-
   const onContentChange = () => {
+    dirtyRef.current = true
     setModified(path, true)
-    markSaved()
+    autosave()
     publishContext()
     updateOutline()
   }
 
-  // 首次打开且文档为空时,用过渡期 content(Phase 2 存的 BijiDoc)播种 Y.Doc——否则旧文档切到协同后会空白。
-  // 仅在 provider 同步完成后判空,避免覆盖服务器已有内容;seededRef + meta('seeded') 防重复播种。
+  // 卸载时兜底落盘:还有未保存改动就立即写回(被 suppressSave 抑制的旧路径会在 saveNow 内跳过)
   useEffect(() => {
-    const provider = session.provider
-    const trySeed = () => {
-      if (seededRef.current || !provider.isSynced) return
-      seededRef.current = true
-      if (!seed || !Array.isArray(seed.blocks) || isBlocksEmpty(seed.blocks as any[])) return
-      if (!isBlocksEmpty(editor.document as any[])) return // 服务器/本地缓存已有内容,无需播种
-      const meta = session.doc.getMap('meta')
-      if (meta.get('seeded')) return
-      const display = blocksForDisplay(seed.blocks as any[], path)
-      session.doc.transact(() => {
-        meta.set('seeded', true)
-        editor.replaceBlocks(editor.document, display as any)
-        if (session.title.length === 0 && seed.title) session.title.insert(0, seed.title)
-      })
-      updateOutline()
-      publishContext()
-    }
-    if (provider.isSynced) trySeed()
-    provider.on('synced', trySeed)
     return () => {
-      provider.off('synced', trySeed)
+      if (dirtyRef.current) void saveNow(true)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, editor])
+  }, [saveNow])
 
   // 正文标题编号叠加层用的编号数组(按 DOM=文档顺序),按所选风格格式化。
   const headingNums = useMemo(
@@ -245,14 +243,11 @@ export function DocEditor({ path, docId, seed }: { path: string; docId: string; 
   }
 
   const onTitleChange = (v: string) => {
-    // 写入共享 Y.Text(整串替换;标题短,开销可忽略)。observe 回调会把值同步回 React state。
-    const t = session.title
-    session.doc.transact(() => {
-      t.delete(0, t.length)
-      t.insert(0, v)
-    })
+    setTitle(v)
+    titleRef.current = v
+    dirtyRef.current = true
     setModified(path, true)
-    markSaved()
+    autosave()
   }
 
   useEffect(() => {
@@ -266,7 +261,7 @@ export function DocEditor({ path, docId, seed }: { path: string; docId: string; 
   useEffect(() => {
     const docName = () => titleRef.current || titleFromPath(path)
     const onSave = () => {
-      /* 协同文档自动保存,无需手动落盘 */
+      void saveNow(true) // 显式保存(Ctrl+S / 失焦),立即落盘
     }
     const onExportMd = async () => {
       try {
@@ -436,7 +431,7 @@ export function DocEditor({ path, docId, seed }: { path: string; docId: string; 
           <div className="doc-meta">
             <span className="doc-meta-author">📝 {user?.name || '我'}</span>
             <span className="doc-meta-sep">·</span>
-            <span>实时协同</span>
+            <span>{formatMeta(updatedAt) || '本地文档'}</span>
           </div>
           <BlockNoteView editor={editor} theme={theme === 'dark' ? 'dark' : 'light'} onChange={onContentChange} />
           <CodeGutters scrollRef={docAreaRef} />

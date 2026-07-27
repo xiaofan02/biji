@@ -1,72 +1,28 @@
 import { useEffect, useState } from 'react'
 import type { BijiDoc } from '@/types'
 import { useTabs } from '@/store/useTabs'
-import { useWorkspace } from '@/store/useWorkspace'
-import { createDoc } from '@/lib/note'
-import { api } from '@/lib/api'
-import { migrateLocalLibrary } from '@/lib/migrate'
-import { toast } from '@/store/useToast'
-import { prompt } from '@/store/usePrompt'
-import { confirm } from '@/store/useConfirm'
+import { loadDoc, DocCorruptError } from '@/lib/note'
+import { pullDoc } from '@/lib/sync'
+import { newDocFlow } from '@/lib/fileOps'
 import { DocEditor } from '@/components/editor/DocEditor'
 import { CodeEditor } from '@/components/editor/CodeEditor'
 import { Icon } from '@/components/common/Icon'
 
+// 本地优先:文档树/正文永远来自本机磁盘(ipc.fs)。登录只用于身份 + 云端同步(叠加层,见 lib/sync.ts),
+// 不再切换数据源、不再有"云端模式"的独立编辑器。
+
 function EmptyState() {
-  const refresh = useWorkspace((s) => s.refresh)
-  const setActivePath = useWorkspace((s) => s.setActivePath)
-  const openTab = useTabs((s) => s.open)
-  const [migrating, setMigrating] = useState(false)
-
-  const newNote = async () => {
-    const name = await prompt('新建文档名称', '未命名文档')
-    if (name === null) return
-    try {
-      const path = await createDoc('', name)
-      await refresh()
-      openTab(path)
-      setActivePath(path)
-    } catch (e) {
-      toast('新建失败:' + (e as Error).message, 'error')
-    }
-  }
-
-  // 一次性把本机旧资料库导入服务器(升级后登录是空树,跑一次把结构+正文搬上来)。
-  const importLocal = async () => {
-    const ok = await confirm({
-      title: '导入本地资料库到服务器',
-      message:
-        '将把本机旧资料库的文件夹与 .bnote 文档(结构 + 正文)一次性上传到当前服务器。可重复运行,已存在的会跳过。\n注意:文档内嵌的图片需稍后在协同库中重新插入。',
-      confirmText: '开始导入'
-    })
-    if (!ok) return
-    setMigrating(true)
-    try {
-      const r = await migrateLocalLibrary()
-      await refresh()
-      const tail = `${r.skipped ? `,跳过 ${r.skipped} 个已存在` : ''}${r.errors.length ? `,${r.errors.length} 个失败` : ''}`
-      toast(`导入完成:${r.docs} 篇文档、${r.dirs} 个文件夹${tail}`, r.errors.length ? 'error' : 'success')
-      if (r.errors.length) console.warn('[biji] 导入失败项:', r.errors)
-    } catch (e) {
-      toast('导入失败:' + (e as Error).message, 'error')
-    } finally {
-      setMigrating(false)
-    }
-  }
-
+  const newNote = () => void newDocFlow('')
   return (
     <div className="empty-state">
       <div className="empty-badge">
         <Icon name="file-text" size={32} strokeWidth={1.6} />
       </div>
       <h2>欢迎使用 笔记 Biji</h2>
-      <p>团队知识库 · 飞书式块编辑 · 实时协同 · AI 助手</p>
+      <p>本地知识库 · 飞书式块编辑 · AI 助手</p>
       <div className="empty-actions">
         <button className="btn primary" onClick={newNote}>
           <Icon name="file-plus" size={16} /> 新建文档
-        </button>
-        <button className="btn" onClick={importLocal} disabled={migrating}>
-          <Icon name="download" size={16} /> {migrating ? '导入中…' : '导入本地资料库'}
         </button>
       </div>
       <div className="empty-hint">在左侧资料库右键，或点此创建你的第一篇文档</div>
@@ -74,19 +30,23 @@ function EmptyState() {
   )
 }
 
-// 加载并挂载某篇协同文档(.bnote)。取服务器节点 id(= Yjs 房间名)+ 过渡期正文(种子),交给 DocEditor 进协同模式。
+// 加载并挂载某篇本地文档(.bnote):读盘 → 解析为 BijiDoc → 交给 DocEditor(本地文件模式)。
+// 登录且服务器可达时,打开前先尽力拉取云端较新版本(pullDoc,失败/未登录则原样用本地)。
 function BnoteHost({ path }: { path: string }) {
-  const [state, setState] = useState<{ docId: string; seed: BijiDoc | null } | null>(null)
+  const [seed, setSeed] = useState<BijiDoc | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
-    setState(null)
+    setSeed(null)
     setError(null)
-    api
-      .getDoc(path)
-      .then(({ id, doc }) => alive && setState({ docId: id, seed: doc }))
-      .catch((e) => alive && setError((e as Error).message || '打开失败'))
+    loadDoc(path)
+      .then((doc) => pullDoc(path, doc)) // 尽力而为:合并云端较新版本;pullDoc 内部失败即返回本地 doc
+      .then((doc) => alive && setSeed(doc))
+      .catch((e) =>
+        alive &&
+        setError(e instanceof DocCorruptError ? '文档内容无法解析,已阻止打开以防覆盖' : (e as Error).message || '打开失败')
+      )
     return () => {
       alive = false
     }
@@ -102,8 +62,8 @@ function BnoteHost({ path }: { path: string }) {
         </div>
       </div>
     )
-  if (!state) return <div className="doc-area"><div className="placeholder-pane">加载文档中…</div></div>
-  return <DocEditor key={path} path={path} docId={state.docId} seed={state.seed} />
+  if (!seed) return <div className="doc-area"><div className="placeholder-pane">加载文档中…</div></div>
+  return <DocEditor key={path} path={path} seed={seed} />
 }
 
 export function DocArea() {

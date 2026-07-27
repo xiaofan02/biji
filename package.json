@@ -57,12 +57,14 @@
     "appId": "com.biji.knowledge",
     "productName": "笔记 Biji",
     "files": [
-      "main.js",
-      "preload.js",
-      "src/**/*",
+      "out/**/*",
       "node_modules/**/*",
+      "package.json",
       "!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.d.ts,*.map,*.ts}",
       "!node_modules/**/{test,tests,__tests__,docs,doc,examples,example}/**"
+    ],
+    "extraResources": [
+      "ssh_agent.py"
     ],
     "directories": {
       "output": "release",

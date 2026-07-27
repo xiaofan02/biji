@@ -1,0 +1,14 @@
+# biji 协同服务器反向代理。reverse_proxy 会自动处理 WebSocket 升级(Yjs 协同走 /collaboration)。
+#
+# 有域名(推荐):把 .env 的 DOMAIN 设为你的域名(A 记录指向公网 IP),
+# Caddy 自动申请 + 续期 Let's Encrypt 证书 → 全程 HTTPS / WSS。
+{$DOMAIN:localhost} {
+	reverse_proxy app:8080
+}
+
+# 没有域名、只有公网 IP 或内网?改用下面这段(自签证书,客户端首次需信任):
+# 注释掉上面的块,启用这一段:
+# :443 {
+# 	tls internal
+# 	reverse_proxy app:8080
+# }

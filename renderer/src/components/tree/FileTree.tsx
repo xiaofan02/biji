@@ -2,16 +2,16 @@ import { useRef, useState } from 'react'
 import type { TreeNode } from '@/types'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useTabs } from '@/store/useTabs'
-import { api } from '@/lib/api'
-import { createDoc } from '@/lib/note'
+import { useSettings } from '@/store/useSettings'
+import { ipc } from '@/lib/ipc'
 import { prompt } from '@/store/usePrompt'
 import { confirm } from '@/store/useConfirm'
 import { toast } from '@/store/useToast'
 import { showContextMenu, type MenuItem } from '@/store/useContextMenu'
 import { useMoveTarget } from '@/store/useMoveTarget'
-import { moveNode, isDescendantOrSelf } from '@/lib/fileOps'
+import { moveNode, newDocFlow, isDescendantOrSelf } from '@/lib/fileOps'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
-import { dirname } from '@/lib/util'
+import { dirname, joinPath } from '@/lib/util'
 import { Icon, type IconName } from '@/components/common/Icon'
 
 function iconFor(node: TreeNode, open: boolean): IconName {
@@ -32,23 +32,16 @@ function displayName(node: TreeNode): string {
 }
 
 // ===== 文件操作 =====
+// 本地优先:所有操作走本机磁盘(ipc.fs / createDoc)+ saveGuard 防幽灵文件。云端同步是叠加层(见 lib/sync.ts)。
+
 async function opNewDoc(dir: string) {
-  const name = await prompt('新建文档名称', '未命名文档')
-  if (name === null) return
-  try {
-    const path = await createDoc(dir, name)
-    await useWorkspace.getState().refresh()
-    useTabs.getState().open(path)
-    useWorkspace.getState().setActivePath(path)
-  } catch (e) {
-    toast('新建失败:' + (e as Error).message, 'error')
-  }
+  await newDocFlow(dir)
 }
 async function opNewFolder(dir: string) {
   const name = await prompt('新建文件夹名称', '新建文件夹')
   if (name === null) return
   try {
-    await api.createNode(dir, name.trim(), 'dir')
+    await ipc.fs.create(dir || useSettings.getState().workspace, name.trim(), true)
     await useWorkspace.getState().refresh()
   } catch (e) {
     toast('新建失败:' + (e as Error).message, 'error')
@@ -62,9 +55,10 @@ async function opRename(node: TreeNode) {
   if (input === null || !input.trim()) return
   const safe = input.replace(/[\\/:*?"<>|]/g, '_').trim()
   const newName = safe + (isFile ? ext : '')
+  const newPath = joinPath(dirname(node.path), newName)
   suppressSave(node.path) // 防止旧路径编辑器卸载时把内容写回原位
   try {
-    const newPath = await api.rename(node.path, newName)
+    await ipc.fs.rename(node.path, newPath)
     useTabs.getState().rename(node.path, newPath)
     await useWorkspace.getState().refresh()
   } catch (e) {
@@ -78,15 +72,15 @@ async function opDelete(node: TreeNode) {
     title: `删除「${displayName(node)}」`,
     message:
       node.type === 'dir'
-        ? '将删除该文件夹及其下所有文档(含历史版本)。此操作不可撤销。'
-        : '将删除该文档及其历史版本。此操作不可撤销。',
+        ? '将把该文件夹及其下所有文档移入系统回收站(可恢复)。'
+        : '将把该文档移入系统回收站(可恢复)。',
     confirmText: '删除',
     danger: true
   })
   if (!ok) return
-  suppressSave(node.path) // 删除后别让旧编辑器卸载 flush 把内容写回服务器
+  suppressSave(node.path) // 删除后别让旧编辑器卸载 flush 把内容写回原位复活
   try {
-    await api.remove(node.path)
+    await ipc.fs.delete(node.path)
     useTabs.getState().close(node.path)
     await useWorkspace.getState().refresh()
   } catch (e) {

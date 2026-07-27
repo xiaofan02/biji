@@ -1,6 +1,9 @@
 import { create } from 'zustand'
-import { api } from '@/lib/api'
+import { ipc } from '@/lib/ipc'
 import type { TreeNode } from '@/types'
+
+// 工作区数据源永远是本机磁盘(ipc.fs)——本地优先。登录只用于身份 + 云端同步(叠加层,见 lib/sync.ts),
+// 不再切换数据源、不再有独立的"云端模式"。
 
 interface WorkspaceState {
   tree: TreeNode[]
@@ -16,7 +19,7 @@ export const useWorkspace = create<WorkspaceState>((set) => ({
   activePath: null,
   expanded: {},
   refresh: async () => {
-    const tree = await api.tree()
+    const tree = (await ipc.fs.list()) as TreeNode[]
     set({ tree })
   },
   setActivePath: (p) => set({ activePath: p }),

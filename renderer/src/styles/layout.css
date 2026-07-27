@@ -54,6 +54,23 @@
   border-radius: 0 3px 3px 0;
   background: var(--accent);
 }
+/* 活动栏账号按钮:登录后显示用户名首字的圆形头像 */
+.activity-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.activity-item.active .activity-avatar {
+  box-shadow: 0 0 0 2px var(--bg-hover);
+}
 
 /* ===== 分屏网格 ===== */
 .pane-grid {

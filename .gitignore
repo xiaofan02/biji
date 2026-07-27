@@ -26,3 +26,11 @@ test-workspace/
 # 用户配置 (避免误提交)
 biji-settings.json
 *.local.json
+
+# 环境变量 / 密钥 (禁止提交,仅提交 .env.example 模板)
+.env
+.env.*
+!.env.example
+
+# 会话交接草稿(上一次被放弃的协同尝试的记录,非项目内容)
+运行记录.md

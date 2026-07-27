@@ -32,6 +32,7 @@ export type IconName =
   | 'disc'
   | 'workflow'
   | 'play'
+  | 'user'
 
 // 每个图标的内部绘制(24x24 viewBox)。统一 stroke,无填充。
 const PATHS: Record<IconName, string> = {
@@ -75,7 +76,8 @@ const PATHS: Record<IconName, string> = {
   disc: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>',
   workflow:
     '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M6 9v3a3 3 0 0 0 3 3h6"/>',
-  play: '<polygon points="6 4 20 12 6 20 6 4"/>'
+  play: '<polygon points="6 4 20 12 6 20 6 4"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
 }
 
 export function Icon({

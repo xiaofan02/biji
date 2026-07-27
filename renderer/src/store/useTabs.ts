@@ -17,6 +17,7 @@ interface TabsState {
   activePath: string | null
   open: (path: string) => void
   close: (path: string) => void
+  closeAll: () => void
   setActive: (path: string) => void
   setModified: (path: string, modified: boolean) => void
   rename: (oldPath: string, newPath: string) => void
@@ -48,6 +49,9 @@ export const useTabs = create<TabsState>((set, get) => ({
   },
 
   setActive: (path) => set({ activePath: path }),
+
+  // 切换工作区模式(登录/登出)时清空所有标签
+  closeAll: () => set({ tabs: [], activePath: null }),
 
   setModified: (path, modified) =>
     set((s) => ({ tabs: s.tabs.map((t) => (t.path === path ? { ...t, modified } : t)) })),

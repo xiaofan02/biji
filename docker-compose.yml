@@ -1,0 +1,53 @@
+# biji 团队协同 —— 一键部署:postgres + 应用(Hocuspocus + Express)+ Caddy(自动 HTTPS)
+# 使用:cp .env.example .env && 改好密钥/域名 && docker compose up -d
+# 首个管理员:docker compose exec app npm run create-admin -- <用户名> <密码> [显示名]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-biji}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-biji}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-biji} -d ${POSTGRES_DB:-biji}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-biji}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-biji}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 设置 JWT_SECRET(长随机串)}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      TOKEN_TTL: ${TOKEN_TTL:-30d}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80' # ACME(Let's Encrypt)签发证书用
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
