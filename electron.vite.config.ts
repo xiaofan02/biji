@@ -11,6 +11,7 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      outDir: resolve(__dirname, 'app-build/main'),
       rollupOptions: {
         input: { index: resolve(__dirname, 'electron/main/index.ts') }
       }
@@ -19,6 +20,7 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      outDir: resolve(__dirname, 'app-build/preload'),
       rollupOptions: {
         input: { index: resolve(__dirname, 'electron/preload/index.ts') }
       }
@@ -30,8 +32,14 @@ export default defineConfig({
       alias: { '@': resolve(__dirname, 'renderer/src') }
     },
     build: {
+      outDir: resolve(__dirname, 'app-build/renderer'),
       rollupOptions: {
-        input: { index: resolve(__dirname, 'renderer/index.html') }
+        input: { index: resolve(__dirname, 'renderer/index.html') },
+        output: {
+          entryFileNames: 'assets/[name].js',
+          chunkFileNames: 'assets/[name].js',
+          assetFileNames: 'assets/[name][extname]'
+        }
       }
     },
     plugins: [react()]

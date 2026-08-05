@@ -168,6 +168,7 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   const headingNumbers = useUI((s) => s.headingNumbers)
   const headingNumberStyle = useUI((s) => s.headingNumberStyle)
   const [headings, setHeadings] = useState<Heading[]>([])
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null)
   const docAreaRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
   const normalizingListsRef = useRef(false)
@@ -306,9 +307,38 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   )
 
   const gotoHeading = (id: string) => {
-    const elm = document.querySelector(`.doc-area [data-id="${CSS.escape(id)}"]`)
+    const elm = docAreaRef.current?.querySelector(`[data-id="${CSS.escape(id)}"]`)
+    setActiveHeadingId(id)
     elm?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+
+  // 滚动正文时同步高亮目录节点。使用正文滚动容器自身计算，不监听整个窗口。
+  useEffect(() => {
+    const scroll = docAreaRef.current
+    if (!scroll || headings.length === 0) return
+    let raf = 0
+    const updateActiveHeading = () => {
+      const top = scroll.getBoundingClientRect().top + 110
+      let active = headings[0]?.id || null
+      for (const heading of headings) {
+        const element = scroll.querySelector<HTMLElement>(`[data-id="${CSS.escape(heading.id)}"]`)
+        if (!element) continue
+        if (element.getBoundingClientRect().top <= top) active = heading.id
+        else break
+      }
+      setActiveHeadingId(active)
+    }
+    const schedule = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(updateActiveHeading)
+    }
+    updateActiveHeading()
+    scroll.addEventListener('scroll', schedule, { passive: true })
+    return () => {
+      cancelAnimationFrame(raf)
+      scroll.removeEventListener('scroll', schedule)
+    }
+  }, [headings])
 
   const onTitleChange = (v: string) => {
     setTitle(v)
@@ -540,24 +570,6 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
 
   return (
     <div className="doc-with-outline">
-      {outlineOpen && headings.length > 0 && (
-        <div className="doc-outline">
-          <div className="doc-outline-title">目录</div>
-          {headings.map((h) => (
-            <div
-              key={h.id}
-              className={`doc-outline-item lv${h.level}`}
-              onClick={() => gotoHeading(h.id)}
-              title={h.text}
-            >
-              {headingNumbers && h.number && (
-                <span className="doc-outline-num">{formatHeadingNumber(h.number, headingNumberStyle)}</span>
-              )}
-              {h.text || '无标题'}
-            </div>
-          ))}
-        </div>
-      )}
       <div className="doc-area" ref={docAreaRef}>
         <div className={`doc-scroll${headingNumbers ? ' numbered' : ''}`}>
           <input
@@ -579,6 +591,37 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
         <CodeBlockInsertAfter containerRef={docAreaRef} editor={editor} />
         <CodeSelectionColorToolbar containerRef={docAreaRef} editor={editor} />
       </div>
+      {outlineOpen && headings.length > 0 && (
+        <aside className="doc-outline" aria-label="文档目录">
+          <div className="doc-outline-rail" aria-hidden="true">
+            {headings.map((h) => (
+              <span
+                key={h.id}
+                className={`doc-outline-tick lv${h.level}${activeHeadingId === h.id ? ' active' : ''}`}
+              />
+            ))}
+          </div>
+          <div className="doc-outline-panel">
+            <div className="doc-outline-title">目录</div>
+            <div className="doc-outline-list">
+              {headings.map((h) => (
+                <button
+                  type="button"
+                  key={h.id}
+                  className={`doc-outline-item lv${h.level}${activeHeadingId === h.id ? ' active' : ''}`}
+                  onClick={() => gotoHeading(h.id)}
+                  title={h.text}
+                >
+                  {headingNumbers && h.number && (
+                    <span className="doc-outline-num">{formatHeadingNumber(h.number, headingNumberStyle)}</span>
+                  )}
+                  {h.text || '无标题'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </aside>
+      )}
     </div>
   )
 }

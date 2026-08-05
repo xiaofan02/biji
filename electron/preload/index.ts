@@ -2,6 +2,19 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // 预加载桥 —— 由 preload.js 完整移植。导出 BijiApi 类型供渲染层 lib/ipc.ts 引用,形成类型化 IPC 契约。
 const api = {
+  update: {
+    getStatus: () => ipcRenderer.invoke('update:get-status'),
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install') as Promise<boolean>,
+    onStatus: (cb: (status: unknown) => void) => {
+      const listener = (_e: unknown, status: unknown) => cb(status)
+      ipcRenderer.on('update:status', listener)
+      return () => {
+        ipcRenderer.removeListener('update:status', listener)
+      }
+    }
+  },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('settings:set', key, value),

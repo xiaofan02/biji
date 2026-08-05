@@ -390,7 +390,7 @@ function TelnetPane() {
 function AboutPane() {
   return (
     <div className="about-pane">
-      <h3>笔记 Biji</h3>
+      <h3>墨启 MOQI</h3>
       <p>本地知识库 · 飞书式块编辑 · 私有数据</p>
       <ul>
         <li>✅ 飞书式块编辑(BlockNote) + Markdown 导出</li>

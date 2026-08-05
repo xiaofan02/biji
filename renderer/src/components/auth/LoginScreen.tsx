@@ -64,7 +64,7 @@ export function LoginScreen() {
   return (
     <div className="modal-backdrop-full" onClick={() => setOpen(false)}>
       <form style={S.card} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <div style={S.brand}>笔记 Biji</div>
+        <div style={S.brand}>墨启 MOQI</div>
         <div style={S.sub}>团队知识库 · {status === 'in' ? '账号' : '登录'}</div>
 
         {status === 'in' && user ? (

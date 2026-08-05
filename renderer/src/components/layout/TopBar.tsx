@@ -1,4 +1,4 @@
-import { useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { ipc } from '@/lib/ipc'
 import { debounce } from '@/lib/util'
 import { useUI } from '@/store/useUI'
@@ -12,6 +12,14 @@ import { prompt } from '@/store/usePrompt'
 import { showContextMenu } from '@/store/useContextMenu'
 import { Icon } from '@/components/common/Icon'
 import type { SearchResult } from '@/types'
+
+type UpdateStatus = {
+  phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+  currentVersion: string
+  version?: string
+  percent?: number
+  message?: string
+}
 
 export function TopBar() {
   const toggleSidebar = useUI((s) => s.toggleSidebar)
@@ -29,7 +37,40 @@ export function TopBar() {
 
   const [results, setResults] = useState<SearchResult[]>([])
   const [showResults, setShowResults] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ phase: 'idle', currentVersion: '' })
   const inputRef = useRef<HTMLInputElement>(null)
+  const updatePhaseRef = useRef(updateStatus.phase)
+
+  useEffect(() => {
+    void ipc.update.getStatus().then((status) => setUpdateStatus(status as UpdateStatus))
+    return ipc.update.onStatus((value) => {
+      const status = value as UpdateStatus
+      setUpdateStatus(status)
+      if (status.phase !== updatePhaseRef.current) {
+        if (status.phase === 'available') toast(status.message || '发现新版本', 'success')
+        if (status.phase === 'downloaded') toast('更新已下载，点击“安装更新”即可升级', 'success')
+        if (status.phase === 'error') toast(`更新失败：${status.message || '请稍后重试'}`, 'error')
+        updatePhaseRef.current = status.phase
+      }
+    })
+  }, [])
+
+  const runUpdateAction = async () => {
+    if (updateStatus.phase === 'available') return void (await ipc.update.download())
+    if (updateStatus.phase === 'downloaded') return void (await ipc.update.install())
+    await ipc.update.check()
+  }
+
+  const updateLabel =
+    updateStatus.phase === 'checking'
+      ? '检查中'
+      : updateStatus.phase === 'downloading'
+        ? `${updateStatus.percent || 0}%`
+        : updateStatus.phase === 'available'
+          ? '下载更新'
+          : updateStatus.phase === 'downloaded'
+            ? '安装更新'
+            : '更新'
 
   const doSearch = useMemo(
     () =>
@@ -83,7 +124,7 @@ export function TopBar() {
       </button>
       <div className="brand">
         <span className="logo">📓</span>
-        <span>笔记 Biji</span>
+        <span>墨启 MOQI</span>
       </div>
 
       <div className="search-box">
@@ -120,6 +161,15 @@ export function TopBar() {
       <div className="spacer" />
 
       <div className="actions">
+        <button
+          className={`icon-btn update-btn${updateStatus.phase === 'available' || updateStatus.phase === 'downloaded' ? ' has-update' : ''}`}
+          title={updateStatus.message || `当前版本 ${updateStatus.currentVersion || '-'}`}
+          disabled={updateStatus.phase === 'checking' || updateStatus.phase === 'downloading'}
+          onClick={() => void runUpdateAction()}
+        >
+          <Icon name={updateStatus.phase === 'downloaded' ? 'download' : 'refresh'} size={15} />
+          <span>{updateLabel}</span>
+        </button>
         <button
           className={`icon-btn${outlineOpen ? ' active' : ''}`}
           title="目录"

@@ -3,12 +3,16 @@ import { join, dirname, extname, relative, isAbsolute, resolve, sep } from 'path
 import fs from 'fs'
 import fsp from 'fs/promises'
 import Store from 'electron-store'
+import { autoUpdater } from 'electron-updater'
 import * as ai from './ai'
 import type { AIProvider, ChatMessage } from './ai'
 import { registerRemoteHandlers, closeAllSessions } from './remote'
 
 // 主进程 —— 由 main.js 完整移植为 TS。
 // 渲染层切换为 React(electron-vite),markdown 渲染交给前端 BlockNote,故移除 md:render。
+
+// 产品展示名改为“墨启 MOQI”，但继续使用旧版用户数据目录，保证升级后工作区、登录和设置不丢失。
+app.setPath('userData', join(app.getPath('appData'), '笔记 Biji'))
 
 const store = new Store({
   name: 'biji-settings',
@@ -28,6 +32,60 @@ const store = new Store({
 
 let mainWindow: BrowserWindow | null = null
 const attachmentTempDir = join(app.getPath('temp'), 'Biji', 'attachments')
+
+type UpdatePhase = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+type UpdateStatus = {
+  phase: UpdatePhase
+  currentVersion: string
+  version?: string
+  percent?: number
+  message?: string
+}
+
+let updateStatus: UpdateStatus = { phase: 'idle', currentVersion: app.getVersion() }
+let updaterReady = false
+
+function setUpdateStatus(next: Partial<UpdateStatus> & Pick<UpdateStatus, 'phase'>): UpdateStatus {
+  updateStatus = { currentVersion: app.getVersion(), ...next }
+  mainWindow?.webContents.send('update:status', updateStatus)
+  return updateStatus
+}
+
+async function checkForAppUpdate(): Promise<UpdateStatus> {
+  if (!app.isPackaged) {
+    return setUpdateStatus({ phase: 'not-available', message: '开发模式不检查更新' })
+  }
+  try {
+    setUpdateStatus({ phase: 'checking' })
+    await autoUpdater.checkForUpdates()
+  } catch (error) {
+    setUpdateStatus({ phase: 'error', message: (error as Error).message })
+  }
+  return updateStatus
+}
+
+function setupAutoUpdater(): void {
+  if (updaterReady) return
+  updaterReady = true
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('checking-for-update', () => setUpdateStatus({ phase: 'checking' }))
+  autoUpdater.on('update-available', (info) =>
+    setUpdateStatus({ phase: 'available', version: info.version, message: `发现新版本 ${info.version}` })
+  )
+  autoUpdater.on('update-not-available', (info) =>
+    setUpdateStatus({ phase: 'not-available', version: info.version, message: '当前已是最新版本' })
+  )
+  autoUpdater.on('download-progress', (progress) =>
+    setUpdateStatus({ phase: 'downloading', percent: Math.round(progress.percent), version: updateStatus.version })
+  )
+  autoUpdater.on('update-downloaded', (info) =>
+    setUpdateStatus({ phase: 'downloaded', version: info.version, percent: 100, message: '更新已下载，点击安装' })
+  )
+  autoUpdater.on('error', (error) => setUpdateStatus({ phase: 'error', message: error.message }))
+
+  if (app.isPackaged) setTimeout(() => void checkForAppUpdate(), 8000)
+}
 
 // 团队协同:用户自有服务器可能用自签证书(IP 部署 + Caddy `tls internal`)。Electron/Chromium
 // 默认不信任自签证书,会以证书错误 / ERR_SSL_PROTOCOL_ERROR 掐断到服务器的 HTTPS/WSS 连接。
@@ -66,7 +124,7 @@ function createWindow(): void {
     minHeight: 600,
     icon: join(app.getAppPath(), 'build', 'icon.png'),
     backgroundColor: '#ffffff',
-    title: '笔记 Biji',
+    title: '墨启 MOQI',
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -142,6 +200,7 @@ function workspaceEntryName(input: string): string {
 app.whenReady().then(() => {
   ensureWorkspace()
   createWindow()
+  setupAutoUpdater()
   Menu.setApplicationMenu(buildMenu())
 
   app.on('activate', () => {
@@ -216,13 +275,37 @@ function buildMenu(): Menu {
     },
     {
       label: '帮助',
-      submenu: [{ label: '关于 笔记 Biji', click: () => send('menu:about') }]
+      submenu: [
+        { label: '检查更新', click: () => void checkForAppUpdate() },
+        { type: 'separator' },
+        { label: '关于 墨启 MOQI', click: () => send('menu:about') }
+      ]
     }
   ]
   return Menu.buildFromTemplate(template)
 }
 
 // ============ IPC: Settings ============
+ipcMain.handle('update:get-status', () => updateStatus)
+ipcMain.handle('update:check', () => checkForAppUpdate())
+ipcMain.handle('update:download', async () => {
+  if (!app.isPackaged || updateStatus.phase !== 'available') return updateStatus
+  try {
+    setUpdateStatus({ phase: 'downloading', percent: 0, version: updateStatus.version })
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    setUpdateStatus({ phase: 'error', message: (error as Error).message })
+  }
+  return updateStatus
+})
+ipcMain.handle('update:install', () => {
+  if (app.isPackaged && updateStatus.phase === 'downloaded') {
+    setImmediate(() => autoUpdater.quitAndInstall(false, true))
+    return true
+  }
+  return false
+})
+
 ipcMain.handle('settings:get', (_e, key: string) => store.get(key))
 ipcMain.handle('settings:set', (_e, key: string, value: unknown) => {
   store.set(key, value)

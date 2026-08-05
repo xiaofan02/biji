@@ -1,4 +1,6 @@
 import { BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
+import { createHighlighterCore } from 'shiki/core'
+import { createOnigurumaEngine } from 'shiki/engine/oniguruma'
 // createCodeBlockSpec 在运行时由 @blocknote/core 导出,但未写入公开类型,故 ts 忽略
 // @ts-ignore
 import { createCodeBlockSpec } from '@blocknote/core'
@@ -24,7 +26,29 @@ export const supportedLanguages: Record<string, { name: string; aliases?: string
   yaml: { name: 'YAML', aliases: ['yml'] }
 }
 
-const HIGHLIGHT_LANGS = Object.keys(supportedLanguages).filter((l) => l !== 'text')
+const createBijiHighlighter = () =>
+  createHighlighterCore({
+    themes: [import('@shikijs/themes/github-dark-default'), import('@shikijs/themes/github-light-default')],
+    langs: [
+      import('@shikijs/langs/bash'),
+      import('@shikijs/langs/c'),
+      import('@shikijs/langs/cpp'),
+      import('@shikijs/langs/css'),
+      import('@shikijs/langs/go'),
+      import('@shikijs/langs/html'),
+      import('@shikijs/langs/java'),
+      import('@shikijs/langs/javascript'),
+      import('@shikijs/langs/json'),
+      import('@shikijs/langs/markdown'),
+      import('@shikijs/langs/python'),
+      import('@shikijs/langs/rust'),
+      import('@shikijs/langs/sql'),
+      import('@shikijs/langs/typescript'),
+      import('@shikijs/langs/xml'),
+      import('@shikijs/langs/yaml')
+    ],
+    engine: createOnigurumaEngine(import('shiki/wasm'))
+  })
 
 // 官方代码块默认使用 plain content，会主动丢弃文字颜色、背景色等行内标记。
 // 保留它的渲染器、键盘行为和 Shiki 扩展，只把内容模式改为 inline：这样选中的代码片段
@@ -33,13 +57,7 @@ const baseCodeBlock = createCodeBlockSpec({
   defaultLanguage: 'text',
   indentLineWithTab: true,
   supportedLanguages,
-  createHighlighter: () =>
-    import('shiki').then(({ createHighlighter }) =>
-      createHighlighter({
-        themes: ['github-dark-default', 'github-light-default'],
-        langs: HIGHLIGHT_LANGS
-      })
-    )
+  createHighlighter: createBijiHighlighter as any
 })
 const annotatableCodeBlock = {
   ...baseCodeBlock,

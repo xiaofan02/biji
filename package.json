@@ -1,21 +1,26 @@
 {
   "name": "biji",
-  "version": "0.1.0",
-  "description": "本地知识库 - 飞书形态 · 块编辑、代码、AI 大模型、SSH/Telnet 远程连接",
-  "main": "out/main/index.js",
+  "version": "0.2.0",
+  "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
+  "main": "app-build/main/index.js",
   "author": "biji",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "clean": "node -e \"require('fs').rmSync('app-build',{recursive:true,force:true})\"",
+    "build": "npm run clean && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder",
-    "dist:win": "electron-vite build && electron-builder --win --x64",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win --x64",
     "start:legacy": "electron main.js"
   },
   "dependencies": {
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
     "@blocknote/core": "latest",
     "@blocknote/mantine": "latest",
     "@blocknote/react": "latest",
@@ -31,38 +36,37 @@
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.1",
     "@hocuspocus/provider": "^2.15.3",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0",
-    "@xterm/xterm": "^5.5.0",
-    "codemirror": "^6.0.1",
-    "electron-store": "^8.2.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "shiki": "^4.0.0",
-    "y-indexeddb": "^9.0.12",
-    "zustand": "^5.0.2"
-  },
-  "devDependencies": {
     "@types/node": "^20.16.10",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "codemirror": "^6.0.1",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "shiki": "^4.0.0",
     "typescript": "^5.6.3",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "y-indexeddb": "^9.0.12",
+    "zustand": "^5.0.2"
   },
   "build": {
     "appId": "com.biji.knowledge",
-    "productName": "笔记 Biji",
+    "productName": "墨启 MOQI",
+    "compression": "normal",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "files": [
-      "out/**/*",
+      "app-build/**/*",
       "build/icon.png",
-      "node_modules/**/*",
-      "package.json",
-      "!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.d.ts,*.map,*.ts}",
-      "!node_modules/**/{test,tests,__tests__,docs,doc,examples,example}/**"
+      "package.json"
     ],
     "extraResources": [
       "ssh_agent.py"
@@ -86,8 +90,7 @@
             "x64"
           ]
         }
-      ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      ]
     },
     "nsis": {
       "installerIcon": "build/icon.ico",
@@ -98,7 +101,11 @@
       "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "笔记 Biji"
+      "shortcutName": "墨启 MOQI",
+      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-Portable.${ext}"
     },
     "mac": {
       "target": "dmg",
@@ -110,6 +117,13 @@
         "deb"
       ],
       "category": "Office"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "xiaofan02",
+        "repo": "biji"
+      }
+    ]
   }
 }

@@ -498,26 +498,116 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
   overflow: hidden;
 }
 .doc-outline {
-  width: 220px;
+  position: absolute;
+  z-index: 30;
+  top: 14px;
+  right: 10px;
+  bottom: 14px;
+  width: 34px;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: auto;
+  transition: width 160ms ease;
+}
+.doc-outline:hover,
+.doc-outline:focus-within {
+  width: min(300px, calc(100% - 24px));
+}
+.doc-outline-rail {
+  width: 34px;
+  padding: 12px 7px;
+  align-self: flex-start;
+  max-height: 76%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  transition: opacity 120ms ease, transform 160ms ease;
+}
+.doc-outline:hover .doc-outline-rail,
+.doc-outline:focus-within .doc-outline-rail {
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+}
+.doc-outline-tick {
+  display: block;
+  width: 18px;
+  height: 2px;
   flex: none;
-  border-right: 1px solid var(--border-light);
-  padding: 18px 8px 24px;
-  overflow-y: auto;
-  background: var(--bg);
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  opacity: 0.45;
+}
+.doc-outline-tick.lv2 { width: 14px; }
+.doc-outline-tick.lv3,
+.doc-outline-tick.lv4,
+.doc-outline-tick.lv5,
+.doc-outline-tick.lv6 { width: 10px; }
+.doc-outline-tick.active {
+  height: 3px;
+  background: var(--accent);
+  opacity: 1;
+}
+.doc-outline-panel {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: min(280px, 100%);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 97%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  transform: translateX(10px);
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 160ms ease;
+}
+.doc-outline:hover .doc-outline-panel,
+.doc-outline:focus-within .doc-outline-panel {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
 }
 .doc-outline-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-tertiary);
-  padding: 0 10px 8px;
+  padding: 13px 14px 9px;
+  border-bottom: 1px solid var(--border-light);
+  flex: none;
+}
+.doc-outline-list {
+  min-height: 0;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .doc-outline-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
   font-size: 13px;
   color: var(--text-secondary);
-  padding: 5px 10px;
+  padding: 6px 9px;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
@@ -528,6 +618,10 @@
 .doc-outline-item:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+.doc-outline-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 /* 目录里的编号:跟随目录项颜色(不灰),与正文标题编号一致 */
 .doc-outline-num {

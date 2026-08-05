@@ -18,7 +18,7 @@ function EmptyState() {
       <div className="empty-badge">
         <Icon name="file-text" size={32} strokeWidth={1.6} />
       </div>
-      <h2>欢迎使用 笔记 Biji</h2>
+      <h2>欢迎使用 墨启 MOQI</h2>
       <p>本地知识库 · 飞书式块编辑 · AI 助手</p>
       <div className="empty-actions">
         <button className="btn primary" onClick={newNote}>
