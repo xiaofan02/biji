@@ -12,7 +12,11 @@ exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
 cd "$REPO_DIR"
-REMOTE_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+git_safe() {
+  git -c safe.directory="$REPO_DIR" "$@"
+}
+
+REMOTE_SHA="$(git_safe ls-remote origin refs/heads/main | awk '{print $1}')"
 [[ -n "$REMOTE_SHA" ]] || exit 0
 
 SUCCESS_SHA="$(
@@ -24,7 +28,7 @@ SUCCESS_SHA="$(
 
 # 最新代码还没有通过测试时保持当前稳定版本。
 [[ "$SUCCESS_SHA" == "$REMOTE_SHA" ]] || exit 0
-CURRENT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+CURRENT_SHA="$(git_safe rev-parse HEAD 2>/dev/null || true)"
 [[ "$CURRENT_SHA" != "$REMOTE_SHA" ]] || exit 0
 
 mkdir -p "$BACKUP_DIR"
@@ -34,8 +38,8 @@ if docker compose ps --status running postgres | grep -q postgres; then
     gzip >"$BACKUP_DIR/biji-${STAMP}.sql.gz"
 fi
 
-git fetch --quiet origin main
-git reset --hard "$REMOTE_SHA"
+git_safe fetch --quiet origin main
+git_safe reset --hard "$REMOTE_SHA"
 docker compose up -d --build --remove-orphans
 
 for _ in $(seq 1 30); do
