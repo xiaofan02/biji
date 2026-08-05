@@ -1,0 +1,11 @@
+[Unit]
+Description=Check GitHub for a tested MOQI server revision
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

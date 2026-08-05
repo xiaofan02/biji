@@ -1,0 +1,11 @@
+[Unit]
+Description=Deploy the latest tested MOQI server revision
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/luxf/biji
+ExecStart=/usr/bin/bash /home/luxf/biji/scripts/server-auto-deploy.sh
+
