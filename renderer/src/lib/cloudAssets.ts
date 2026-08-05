@@ -43,9 +43,24 @@ function isInlineRef(key: string): boolean {
 }
 
 async function inlineAsset(url: string): Promise<{ blob: Blob; key: string }> {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error('读取内嵌附件失败')
-  const blob = await response.blob()
+  const comma = url.indexOf(',')
+  if (comma < 5) throw new Error('内嵌附件格式无效')
+  const header = url.slice(5, comma)
+  const payload = url.slice(comma + 1)
+  const mime = header.split(';')[0] || 'application/octet-stream'
+  let bytes: Uint8Array
+  try {
+    if (/(?:^|;)base64(?:;|$)/i.test(header)) {
+      const binary = atob(payload.replace(/\s/g, ''))
+      bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(payload))
+    }
+  } catch {
+    throw new Error('内嵌附件内容损坏，无法解析')
+  }
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  const blob = new Blob([buffer], { type: mime })
   const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
   const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
   return { blob, key: `inline:sha256:${hex}` }
