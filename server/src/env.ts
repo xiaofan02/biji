@@ -16,6 +16,8 @@ export const env = {
   publicUrl: (process.env.PUBLIC_URL ?? '').replace(/\/+$/, ''),
   // 登录令牌有效期
   tokenTtl: process.env.TOKEN_TTL ?? '30d',
+  registrationEnabled: process.env.REGISTRATION_ENABLED === 'true',
+  registrationCode: process.env.REGISTRATION_CODE ?? '',
   // 版本快照最小间隔(毫秒):同一文档两次快照至少间隔这么久,避免高频自动保存把历史刷成碎片
   snapshotMinIntervalMs: Number(process.env.SNAPSHOT_MIN_INTERVAL_MS ?? 5 * 60 * 1000),
   // 每篇文档最多保留多少份版本快照(滚动删除更旧的)

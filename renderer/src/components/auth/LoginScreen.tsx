@@ -13,11 +13,15 @@ export function LoginScreen() {
   const status = useAuth((s) => s.status)
   const user = useAuth((s) => s.user)
   const login = useAuth((s) => s.login)
+  const register = useAuth((s) => s.register)
   const logout = useAuth((s) => s.logout)
   const error = useAuth((s) => s.error)
   const [serverUrl, setServerUrl] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [displayName, setDisplayName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [busy, setBusy] = useState(false)
 
   // 打开时回填上次的服务器地址 / 用户名
@@ -30,11 +34,6 @@ export function LoginScreen() {
       if (lastUser) setUsername(lastUser)
     })()
   }, [open])
-
-  // 登录成功后自动收起弹窗
-  useEffect(() => {
-    if (open && status === 'in') setOpen(false)
-  }, [open, status, setOpen])
 
   // Esc 关闭
   useEffect(() => {
@@ -53,7 +52,11 @@ export function LoginScreen() {
     if (busy) return
     setBusy(true)
     try {
-      await login(serverUrl, username, password)
+      if (mode === 'login') await login(serverUrl, username, password)
+      else await register(serverUrl, username, password, displayName, inviteCode)
+      setPassword('')
+      setInviteCode('')
+      setOpen(false)
     } catch {
       /* 错误信息已写入 store.error */
     } finally {
@@ -65,7 +68,7 @@ export function LoginScreen() {
     <div className="modal-backdrop-full" onClick={() => setOpen(false)}>
       <form style={S.card} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <div style={S.brand}>墨启 MOQI</div>
-        <div style={S.sub}>团队知识库 · {status === 'in' ? '账号' : '登录'}</div>
+        <div style={S.sub}>团队知识库 · {status === 'in' ? '账号' : mode === 'login' ? '登录' : '注册'}</div>
 
         {status === 'in' && user ? (
           <>
@@ -83,10 +86,10 @@ export function LoginScreen() {
               type="button"
               onClick={async () => {
                 await logout()
-                setOpen(false)
+                setMode('login')
               }}
             >
-              登出
+              退出登录
             </button>
           </>
         ) : (
@@ -104,6 +107,13 @@ export function LoginScreen() {
             <label style={S.label}>用户名</label>
             <input style={S.input} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
 
+            {mode === 'register' && (
+              <>
+                <label style={S.label}>显示名称（可选）</label>
+                <input style={S.input} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              </>
+            )}
+
             <label style={S.label}>密码</label>
             <input
               style={S.input}
@@ -112,12 +122,32 @@ export function LoginScreen() {
               onChange={(e) => setPassword(e.target.value)}
             />
 
+            {mode === 'register' && (
+              <>
+                <label style={S.label}>注册邀请码</label>
+                <input
+                  style={S.input}
+                  type="password"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                />
+              </>
+            )}
+
             {error && <div style={S.error}>{error}</div>}
 
             <button style={{ ...S.btn, ...(busy ? S.btnBusy : {}) }} type="submit" disabled={busy}>
-              {busy ? '登录中…' : '登录'}
+              {busy ? (mode === 'login' ? '登录中…' : '注册中…') : mode === 'login' ? '登录' : '注册并登录'}
             </button>
-            <div style={S.hint}>登录后整个资料库切到团队服务器并实时协同;不登录则继续使用本地库。</div>
+            <button
+              style={S.switchBtn}
+              type="button"
+              disabled={busy}
+              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+            >
+              {mode === 'login' ? '没有账号？注册新账号' : '已有账号？返回登录'}
+            </button>
+            <div style={S.hint}>登录后启用团队服务器同步；退出登录后仍可继续使用本地资料库。</div>
           </>
         )}
       </form>
@@ -162,6 +192,14 @@ const S: Record<string, React.CSSProperties> = {
     cursor: 'pointer'
   },
   btnBusy: { opacity: 0.7, cursor: 'default' },
+  switchBtn: {
+    marginTop: 12,
+    border: 'none',
+    background: 'transparent',
+    color: '#3370ff',
+    fontSize: 13,
+    cursor: 'pointer'
+  },
   loggedIn: { display: 'flex', alignItems: 'center', gap: 12, padding: '4px 0 8px' },
   avatar: {
     width: 40,

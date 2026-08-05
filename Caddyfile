@@ -2,6 +2,12 @@
 #
 # 有域名(推荐):把 .env 的 DOMAIN 设为你的域名(A 记录指向公网 IP),
 # Caddy 自动申请 + 续期 Let's Encrypt 证书 → 全程 HTTPS / WSS。
+{
+	# Windows/Chromium 以 IP 访问 TLS 时可能不发送 SNI。指定默认名称后，Caddy 仍能选中
+	# 为该 IP 签发的内部证书，避免 TLS 握手在到达登录 API 前就失败。
+	default_sni {$DOMAIN:localhost}
+}
+
 {$DOMAIN:localhost} {
 	reverse_proxy app:8080
 }
