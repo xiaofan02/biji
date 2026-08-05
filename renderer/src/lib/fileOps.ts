@@ -7,6 +7,14 @@ import { useWorkspace } from '@/store/useWorkspace'
 import { useSettings } from '@/store/useSettings'
 import { toast } from '@/store/useToast'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
+import { relocateNode } from '@/lib/sync'
+
+const INBOX_FOLDER = '收集箱'
+
+function quickNoteName(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `随手记 ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}`
+}
 
 // 本地优先:新建/移动等结构操作永远走本机磁盘(ipc.fs / createDoc)。
 // 云端同步是叠加层(见 lib/sync.ts),不在这里分叉。
@@ -22,6 +30,22 @@ export async function newDocFlow(dir: string): Promise<void> {
     useWorkspace.getState().setActivePath(path)
   } catch (e) {
     toast('新建失败:' + (e as Error).message, 'error')
+  }
+}
+
+// 低摩擦记录入口：不询问文件名，直接放入“收集箱”。用户可在稍后通过
+// 拖拽或“移动到...”整理，避免记下一条信息前先决定归档位置。
+export async function quickNoteFlow(): Promise<void> {
+  try {
+    const workspace = useSettings.getState().workspace
+    const inbox = joinPath(workspace, INBOX_FOLDER)
+    await ipc.fs.create(workspace, INBOX_FOLDER, true)
+    const path = await createDoc(inbox, quickNoteName())
+    await useWorkspace.getState().refresh()
+    useTabs.getState().open(path)
+    useWorkspace.getState().setActivePath(path)
+  } catch (e) {
+    toast('创建随手记失败:' + (e as Error).message, 'error')
   }
 }
 
@@ -49,6 +73,7 @@ export async function moveNode(srcPath: string, destDir: string): Promise<void> 
   try {
     await ipc.fs.rename(srcPath, newPath)
     useTabs.getState().rename(srcPath, newPath)
+    void relocateNode(srcPath, newPath)
     // 同步工作区高亮的 activePath(含被移动文件夹下当前打开的文档)
     const ws = useWorkspace.getState()
     const ap = ws.activePath

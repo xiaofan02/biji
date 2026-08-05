@@ -71,6 +71,8 @@ export interface BijiDoc {
   createdAt: number
   updatedAt: number
   blocks: unknown[]
+  /** 本地相对图片路径 -> 云端资源路径；用于跨设备同步且避免重复上传。 */
+  assetRefs?: Record<string, string>
 }
 
 // 编辑器标签页

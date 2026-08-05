@@ -1,6 +1,7 @@
 import { ipc } from '@/lib/ipc'
 import { api } from '@/lib/api'
 import { useSettings } from '@/store/useSettings'
+import { prepareDocForUpload } from '@/lib/cloudAssets'
 import type { TreeNode } from '@/types'
 
 export interface MigrateResult {
@@ -62,10 +63,6 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
         }
         if (n.children?.length) await walk(n.children, vpath)
       } else if (n.name.toLowerCase().endsWith('.bnote')) {
-        if (serverPaths.has(vpath)) {
-          res.skipped++
-          continue
-        }
         try {
           const raw = await ipc.fs.read(n.path)
           const doc = raw ? JSON.parse(raw) : null
@@ -73,9 +70,21 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
             res.errors.push(`${vpath}: 不是有效的 .bnote`)
             continue
           }
-          const node = await api.createNode(parentVirtual, n.name, 'file')
-          await api.putDoc(node.path, doc)
-          serverPaths.add(node.path)
+          let targetPath = vpath
+          let nodeId: string
+          if (!serverPaths.has(vpath)) {
+            const node = await api.createNode(parentVirtual, n.name, 'file')
+            targetPath = node.path
+            nodeId = node.id as string
+            serverPaths.add(targetPath)
+          } else {
+            nodeId = (await api.getDoc(vpath)).id
+          }
+          // “上传全部”是用户显式发起的本地→云端操作；对同路径节点也必须
+          // 写正文，不能只因树节点已存在而静默跳过。
+          const prepared = await prepareDocForUpload(n.path, nodeId, doc)
+          if (prepared.mappingChanged) await ipc.fs.write(n.path, JSON.stringify(prepared.localDoc))
+          await api.putDoc(targetPath, prepared.cloudDoc)
           res.docs++
           onProgress?.(`文档 ${vpath}`)
         } catch (e) {

@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage } from 'electron'
-import { join, dirname, extname, relative, isAbsolute } from 'path'
+import { join, dirname, extname, relative, isAbsolute, resolve, sep } from 'path'
 import fs from 'fs'
 import fsp from 'fs/promises'
 import Store from 'electron-store'
@@ -27,6 +27,7 @@ const store = new Store({
 }) as any
 
 let mainWindow: BrowserWindow | null = null
+const attachmentTempDir = join(app.getPath('temp'), 'Biji', 'attachments')
 
 // 团队协同:用户自有服务器可能用自签证书(IP 部署 + Caddy `tls internal`)。Electron/Chromium
 // 默认不信任自签证书,会以证书错误 / ERR_SSL_PROTOCOL_ERROR 掐断到服务器的 HTTPS/WSS 连接。
@@ -63,6 +64,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 960,
     minHeight: 600,
+    icon: join(app.getAppPath(), 'build', 'icon.png'),
     backgroundColor: '#ffffff',
     title: '笔记 Biji',
     show: false,
@@ -117,6 +119,26 @@ function ensureWorkspace(): string {
   return ws
 }
 
+// 渲染进程传来的路径一律限制在当前工作区内。preload 暴露的是通用文件
+// 操作接口，不能把它变成访问用户任意文件的能力。
+function workspacePath(input: string, allowRoot = true): string {
+  const root = resolve(store.get('workspace') as string)
+  const target = resolve(String(input))
+  const rel = relative(root, target)
+  if ((!allowRoot && !rel) || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error('路径必须位于当前工作区内')
+  }
+  return target
+}
+
+function workspaceEntryName(input: string): string {
+  const name = String(input).trim()
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw new Error('文件名非法')
+  }
+  return name
+}
+
 app.whenReady().then(() => {
   ensureWorkspace()
   createWindow()
@@ -141,6 +163,7 @@ function buildMenu(): Menu {
       label: '文件',
       submenu: [
         { label: '新建笔记', accelerator: 'CmdOrCtrl+N', click: () => send('menu:new-note') },
+        { label: '快速随手记', accelerator: 'CmdOrCtrl+Alt+N', click: () => send('menu:quick-note') },
         { label: '新建文件夹', accelerator: 'CmdOrCtrl+Shift+N', click: () => send('menu:new-folder') },
         { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('menu:save') },
@@ -269,8 +292,18 @@ async function walkDir(dir: string): Promise<TreeNode[]> {
   return result
 }
 
-ipcMain.handle('fs:list', async (_e, dirPath?: string) => walkDir(dirPath || (store.get('workspace') as string)))
-ipcMain.handle('fs:read', async (_e, filePath: string) => fsp.readFile(filePath, 'utf-8'))
+ipcMain.handle('fs:list', async (_e, dirPath?: string) => walkDir(workspacePath(dirPath || (store.get('workspace') as string))))
+ipcMain.handle('fs:read', async (_e, filePath: string) => fsp.readFile(workspacePath(filePath, false), 'utf-8'))
+ipcMain.handle('fs:read-binary', async (_e, filePath: string) => {
+  const data = await fsp.readFile(workspacePath(filePath, false))
+  return new Uint8Array(data)
+})
+ipcMain.handle('fs:write-binary', async (_e, filePath: string, data: Uint8Array) => {
+  const target = workspacePath(filePath, false)
+  await fsp.mkdir(dirname(target), { recursive: true })
+  await fsp.writeFile(target, Buffer.from(data))
+  return true
+})
 
 // 写前版本备份(尽力而为):覆盖工作区内已存在且非空的 .bnote 前,把旧内容留存到隐藏目录
 // <workspace>/.biji-history/<相对路径>/<时间戳>.bnote。每文件最多每 5 分钟留一份、滚动保留最近 30 份。
@@ -315,6 +348,7 @@ async function backupBeforeOverwrite(filePath: string): Promise<void> {
 }
 
 ipcMain.handle('fs:write', async (_e, filePath: string, content: string) => {
+  filePath = workspacePath(filePath, false)
   await fsp.mkdir(dirname(filePath), { recursive: true })
   await backupBeforeOverwrite(filePath) // 覆盖前留存旧版本(仅工作区内 .bnote),可在 .biji-history 里找回
   // 原子写:先写临时文件,再 rename 覆盖目标。rename 同卷原子,杜绝写入中途崩溃/断电把目标
@@ -331,7 +365,7 @@ ipcMain.handle('fs:write', async (_e, filePath: string, content: string) => {
   return true
 })
 ipcMain.handle('fs:create', async (_e, parent: string, name: string, isDir: boolean) => {
-  const full = join(parent, name)
+  const full = workspacePath(join(workspacePath(parent), workspaceEntryName(name)), false)
   if (isDir) {
     await fsp.mkdir(full, { recursive: true })
   } else {
@@ -341,12 +375,12 @@ ipcMain.handle('fs:create', async (_e, parent: string, name: string, isDir: bool
   return full
 })
 ipcMain.handle('fs:rename', async (_e, oldPath: string, newPath: string) => {
-  await fsp.rename(oldPath, newPath)
+  await fsp.rename(workspacePath(oldPath, false), workspacePath(newPath, false))
   return true
 })
 ipcMain.handle('fs:delete', async (_e, target: string) => {
   // 移入系统回收站(可恢复),而非永久删除
-  await shell.trashItem(target)
+  await shell.trashItem(workspacePath(target, false))
   return true
 })
 ipcMain.handle('fs:workspace', () => store.get('workspace'))
@@ -439,6 +473,7 @@ ipcMain.handle('log:stop', (_e, id: string) => {
 
 // 保存图片到笔记同级 assets 目录,返回相对路径(用于文档内引用)
 ipcMain.handle('fs:save-image', async (_e, notePath: string, data: Uint8Array, ext: string) => {
+  notePath = workspacePath(notePath, false)
   const dir = dirname(notePath)
   const assetsDir = join(dir, 'assets')
   await fsp.mkdir(assetsDir, { recursive: true })
@@ -507,6 +542,25 @@ registerRemoteHandlers(ipcMain)
 
 // ============ IPC: System ============
 ipcMain.handle('sys:open-external', (_e, url: string) => shell.openExternal(url))
+ipcMain.handle('sys:open-path', async (_e, p: string) => {
+  const target = workspacePath(p, false)
+  const error = await shell.openPath(target)
+  if (error) throw new Error(error)
+  return true
+})
+ipcMain.handle('sys:open-data-file', async (_e, name: string, dataUrl: string) => {
+  const match = String(dataUrl).match(/^data:[^;,]*(?:;[^;,=]+=[^;,]*)*;base64,([\s\S]+)$/i)
+  if (!match) throw new Error('附件数据格式无效')
+  if (match[1].length > 140_000_000) throw new Error('附件过大，无法直接打开')
+
+  const safeName = String(name || '附件').replace(/[\\/:*?"<>|]/g, '_').trim() || '附件'
+  await fsp.mkdir(attachmentTempDir, { recursive: true })
+  const target = join(attachmentTempDir, `${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${safeName}`)
+  await fsp.writeFile(target, Buffer.from(match[1], 'base64'))
+  const error = await shell.openPath(target)
+  if (error) throw new Error(error)
+  return true
+})
 ipcMain.handle('sys:show-in-folder', (_e, p: string) => shell.showItemInFolder(p))
 ipcMain.handle('sys:choose-file', async () => {
   if (!mainWindow) return null

@@ -3,7 +3,7 @@ import { create } from 'zustand'
 export type RightPanel = 'ai' | 'terminal' | null
 
 // 标题编号显示风格(顶栏 # 控制是否显示,这里控制格式):
-// arabic-dot=1. / arabic=1 / paren=(1) / cn=一、 / cn-paren=(一)。多级逐级转换,如 1.1 / 一.二。
+// arabic-dot=1. / arabic=1 / paren=(1) / cn=一级“一、”、子级“1.1” / cn-paren=(一)。
 export type HeadingNumberStyle = 'arabic-dot' | 'arabic' | 'paren' | 'cn' | 'cn-paren'
 
 interface UIState {
@@ -35,7 +35,7 @@ export const useUI = create<UIState>((set, get) => ({
   loginOpen: false,
   outlineOpen: true,
   headingNumbers: true,
-  headingNumberStyle: 'arabic-dot',
+  headingNumberStyle: 'cn',
   sidebarWidth: 260,
   rightPanelWidth: 380,
 

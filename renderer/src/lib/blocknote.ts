@@ -26,22 +26,30 @@ export const supportedLanguages: Record<string, { name: string; aliases?: string
 
 const HIGHLIGHT_LANGS = Object.keys(supportedLanguages).filter((l) => l !== 'text')
 
-// 带 Shiki 语法高亮的飞书式 schema;shiki 懒加载,首次出现代码块时才下载高亮器
+// 官方代码块默认使用 plain content，会主动丢弃文字颜色、背景色等行内标记。
+// 保留它的渲染器、键盘行为和 Shiki 扩展，只把内容模式改为 inline：这样选中的代码片段
+// 可以使用 BlockNote 自带的颜色工具，标记也会进入文档 JSON，能够保存、同步和导出。
+const baseCodeBlock = createCodeBlockSpec({
+  defaultLanguage: 'text',
+  indentLineWithTab: true,
+  supportedLanguages,
+  createHighlighter: () =>
+    import('shiki').then(({ createHighlighter }) =>
+      createHighlighter({
+        themes: ['github-dark-default', 'github-light-default'],
+        langs: HIGHLIGHT_LANGS
+      })
+    )
+})
+const annotatableCodeBlock = {
+  ...baseCodeBlock,
+  config: { ...baseCodeBlock.config, content: 'inline' }
+} as any
+
+// 带 Shiki 语法高亮、并支持片段颜色标注的飞书式 schema。
 export const bijiSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
-    // @ts-ignore createCodeBlockSpec 运行时存在
-    codeBlock: createCodeBlockSpec({
-      defaultLanguage: 'text',
-      indentLineWithTab: true,
-      supportedLanguages,
-      createHighlighter: () =>
-        import('shiki').then(({ createHighlighter }) =>
-          createHighlighter({
-            themes: ['github-dark-default', 'github-light-default'],
-            langs: HIGHLIGHT_LANGS
-          })
-        )
-    })
+    codeBlock: annotatableCodeBlock
   }
 })

@@ -37,22 +37,60 @@
   padding-block: 3px;
 }
 
-/* 标题:层级字号 + 上方留白,贴近飞书 */
+/* 标题:克制的层级差异，避免长文阅读时显得突兀。 */
 .doc-scroll [data-content-type='heading'] {
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  --level: 1.2em;
+  font-size: clamp(21px, 1.2em, 24px) !important;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.4;
+  padding-top: 9px;
 }
-.doc-scroll .bn-block-outer [data-level='1'] {
-  font-size: 1.75em;
-  margin-top: 1.2em;
+.doc-scroll [data-content-type='heading']:not([data-level]),
+.doc-scroll [data-content-type='heading'][data-level='1'],
+.doc-scroll
+  .bn-block-outer[data-prev-type='heading'][data-prev-level='1']
+  > .bn-block
+  > .bn-block-content[data-content-type='heading'] {
+  --level: 1.2em;
+  font-size: clamp(21px, 1.2em, 24px) !important;
+  padding-top: 11px;
 }
-.doc-scroll .bn-block-outer [data-level='2'] {
-  font-size: 1.4em;
-  margin-top: 1em;
+/* 一级标题的 level=1 是默认值，BlockNote 的过渡 DOM 有时也会省略 prev-level。 */
+.doc-scroll
+  .bn-block-outer[data-prev-type='heading']:not([data-prev-level])
+  > .bn-block
+  > .bn-block-content[data-content-type='heading'] {
+  font-size: clamp(21px, 1.2em, 24px) !important;
 }
-.doc-scroll .bn-block-outer [data-level='3'] {
-  font-size: 1.18em;
-  margin-top: 0.8em;
+.doc-scroll [data-content-type='heading'][data-level='2'],
+.doc-scroll
+  .bn-block-outer[data-prev-type='heading'][data-prev-level='2']
+  > .bn-block
+  > .bn-block-content[data-content-type='heading'] {
+  --level: 1.12em;
+  font-size: clamp(19px, 1.12em, 22px) !important;
+  padding-top: 11px;
+}
+.doc-scroll [data-content-type='heading'][data-level='3'],
+.doc-scroll
+  .bn-block-outer[data-prev-type='heading'][data-prev-level='3']
+  > .bn-block
+  > .bn-block-content[data-content-type='heading'] {
+  --level: 1em;
+  font-size: clamp(17px, 1em, 20px) !important;
+  padding-top: 8px;
+  margin-left: 24px;
+}
+/* BlockNote 在块类型切换期间会改用 prev-level；同步覆盖它，避免标题忽然跳回默认的 3em/2em。 */
+.doc-scroll [data-prev-level='1'] {
+  --prev-level: 1.2em;
+}
+.doc-scroll [data-prev-level='2'] {
+  --prev-level: 1.12em;
+}
+.doc-scroll [data-prev-level='3'] {
+  --prev-level: 1em;
 }
 
 /* 段落 */
@@ -172,8 +210,164 @@
   word-break: normal !important;
 }
 /* 代码块悬浮复制按钮(.doc-area 的子元素,跟随悬停的代码块定位) */
+/* 用户手动标注的文字颜色优先于 Shiki 语法着色。 */
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='gray'] {
+  color: var(--bn-colors-highlights-gray-text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='red'] {
+  color: var(--bn-colors-highlights-red-text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='orange'] {
+  color: var(--bn-colors-highlights-orange-text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='yellow'] {
+  color: var(--bn-colors-highlights-yellow-text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='green'] {
+  color: var(--bn-colors-highlights-green-text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='blue'] {
+  color: var(--bn-colors-highlights-blue-text) !important;
+}
+.doc-scroll [data-content-type='codeBlock'] [data-style-type='textColor'][data-value='purple'] {
+  color: var(--bn-colors-highlights-purple-text) !important;
+}
 .doc-area {
   position: relative;
+}
+.code-insert-after {
+  position: fixed;
+  z-index: 70;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 110px;
+  height: 26px;
+  padding: 0 10px;
+  color: var(--accent);
+  background: var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 13px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  font-size: 12px;
+  cursor: pointer;
+  animation: code-insert-in 0.12s ease-out;
+}
+.code-insert-after:hover {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.code-insert-after span {
+  font-size: 16px;
+  line-height: 1;
+}
+@keyframes code-insert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.code-color-toolbar {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 3px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 22px rgb(0 0 0 / 24%);
+}
+.code-color-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.code-color-trigger:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.code-color-a,
+.code-color-highlight {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 18px;
+  color: #f54a45;
+  font-size: 14px;
+  font-weight: 700;
+  border-bottom: 2px solid #f54a45;
+}
+.code-color-highlight {
+  color: #202124;
+  background: #f5cf3d;
+  border-bottom: 0;
+  border-radius: 3px;
+}
+.code-color-palette {
+  position: absolute;
+  top: 38px;
+  left: 0;
+  min-width: 246px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 28%);
+}
+.code-color-palette-title {
+  margin: 0 0 8px 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.code-color-swatches {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.code-color-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--bg-elevated);
+  border-radius: 50%;
+  outline: 1px solid var(--border);
+  cursor: pointer;
+}
+.code-color-swatch:hover {
+  transform: scale(1.12);
+}
+.code-color-clear {
+  height: 24px;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.code-color-clear:hover {
+  color: var(--text);
+  background: var(--bg-hover);
 }
 .code-copy-float {
   position: absolute;
@@ -348,24 +542,26 @@
   padding-left: 22px;
 }
 .doc-outline-item.lv3 {
-  padding-left: 34px;
+  padding-left: 46px;
 }
 .doc-outline-item.lv4,
 .doc-outline-item.lv5,
 .doc-outline-item.lv6 {
-  padding-left: 46px;
+  padding-left: 58px;
   font-size: 12px;
 }
 
-/* ===== 斜杠 / 块菜单:飞书式 —— 隐藏描述与快捷键,行距舒适不拥挤 ===== */
-.bn-suggestion-menu {
-  max-height: 56vh;
+/* ===== 斜杠 / 块菜单:紧凑的飞书式菜单 ===== */
+.bn-mantine .bn-suggestion-menu {
+  max-height: min(360px, 48vh);
   overflow-y: auto;
-  padding: 6px;
-  border-radius: 10px;
-  min-width: 200px;
-  max-width: 260px;
+  padding: 5px;
+  border-radius: 9px;
+  min-width: 206px;
+  max-width: 224px;
   box-shadow: var(--shadow);
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
 }
 /* 隐藏描述副标题与右侧快捷键徽标 —— 飞书没有 */
 .bn-mt-suggestion-menu-item-subtitle {
@@ -374,25 +570,45 @@
 .bn-mt-suggestion-menu-item-section[data-position='right'] {
   display: none !important;
 }
-/* 菜单项:单行、舒适行高 */
-.bn-suggestion-menu [role='option'] {
-  padding: 7px 10px !important;
-  border-radius: 8px;
+/* 菜单项:去掉组件默认的 52px 固定高度，保持单行紧凑但仍易点击 */
+.bn-mantine .bn-suggestion-menu [role='option'] {
+  height: 38px;
+  min-height: 38px;
+  padding: 5px 8px !important;
+  border-radius: 7px;
 }
 /* 图标:去掉默认的深色方形底框,飞书是干净图标 */
 .bn-mt-suggestion-menu-item-section[data-position='left'] {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
+  width: 24px;
+  min-width: 24px;
+  padding: 0 !important;
+  margin-inline-end: 7px !important;
+}
+.bn-mt-suggestion-menu-item-section[data-position='left'] svg {
+  width: 17px;
+  height: 17px;
+}
+.bn-mt-suggestion-menu-item-body {
+  min-width: 0;
+  padding-right: 0 !important;
 }
 .bn-mt-suggestion-menu-item-title {
-  font-size: 14px !important;
+  overflow: hidden;
+  font-size: 13px !important;
   font-weight: 400 !important;
+  line-height: 20px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* 分组标签 */
-.bn-suggestion-menu-label {
+.bn-mantine .bn-suggestion-menu-label {
   font-size: 11px !important;
   color: var(--text-tertiary) !important;
+  line-height: 16px;
+  padding: 5px 8px 2px !important;
 }
 
 /* ===== CodeMirror 宿主(代码/文本文件) ===== */

@@ -58,6 +58,7 @@
     "productName": "笔记 Biji",
     "files": [
       "out/**/*",
+      "build/icon.png",
       "node_modules/**/*",
       "package.json",
       "!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.d.ts,*.map,*.ts}",
@@ -71,6 +72,7 @@
       "buildResources": "build"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -88,6 +90,9 @@
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,

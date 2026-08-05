@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ipc } from '@/lib/ipc'
 import { api, ApiError } from '@/lib/api'
 import { saveDoc } from '@/lib/note'
+import { materializeCloudAssets, prepareDocForUpload } from '@/lib/cloudAssets'
 import { migrateLocalLibrary, type MigrateResult } from '@/lib/migrate'
 import { useAuth } from '@/store/useAuth'
 import { useSettings } from '@/store/useSettings'
@@ -15,21 +16,53 @@ import type { BijiDoc, TreeNode } from '@/types'
 
 // ---- 同步状态(供 StatusBar 显示;与 sync 逻辑同文件,避免多建 store 文件)----
 export type SyncStatus = 'off' | 'idle' | 'syncing' | 'offline' | 'error'
+export type NoteSyncStatus = 'pending' | 'syncing' | 'synced' | 'error'
+export interface NoteSyncState {
+  status: NoteSyncStatus
+  error?: string
+  updatedAt: number
+}
 interface SyncState {
   enabled: boolean // 用户开关(默认开);关掉则全 no-op
   status: SyncStatus
   lastSyncedAt: number | null
+  notes: Record<string, NoteSyncState>
   setEnabled: (v: boolean) => void
   setStatus: (s: SyncStatus) => void
   markSynced: () => void
+  setNote: (path: string, status: NoteSyncStatus, error?: string) => void
+  relocateNotes: (oldPath: string, newPath: string) => void
+  removeNotes: (path: string) => void
 }
 export const useSync = create<SyncState>((set) => ({
   enabled: true,
   status: 'idle',
   lastSyncedAt: null,
+  notes: {},
   setEnabled: (v) => set({ enabled: v, status: v ? 'idle' : 'off' }),
   setStatus: (s) => set({ status: s }),
-  markSynced: () => set({ status: 'idle', lastSyncedAt: Date.now() })
+  markSynced: () => set({ status: 'idle', lastSyncedAt: Date.now() }),
+  setNote: (path, status, error) =>
+    set((state) => ({ notes: { ...state.notes, [path]: { status, error, updatedAt: Date.now() } } })),
+  relocateNotes: (oldPath, newPath) =>
+    set((state) => {
+      const notes = { ...state.notes }
+      for (const [path, value] of Object.entries(state.notes)) {
+        if (path === oldPath || path.startsWith(oldPath + '/') || path.startsWith(oldPath + '\\')) {
+          delete notes[path]
+          notes[newPath + path.slice(oldPath.length)] = value
+        }
+      }
+      return { notes }
+    }),
+  removeNotes: (path) =>
+    set((state) => ({
+      notes: Object.fromEntries(
+        Object.entries(state.notes).filter(
+          ([key]) => key !== path && !key.startsWith(path + '/') && !key.startsWith(path + '\\')
+        )
+      )
+    }))
 }))
 
 const norm = (p: string) => p.replace(/\\/g, '/')
@@ -118,6 +151,7 @@ export function pushDoc(localPath: string, doc: BijiDoc): void {
   if (!active()) return
   const vpath = localToVirtual(localPath)
   if (!vpath) return
+  useSync.getState().setNote(localPath, 'pending')
   pending.set(vpath, doc)
   const t = timers.get(vpath)
   if (t) clearTimeout(t)
@@ -125,6 +159,88 @@ export function pushDoc(localPath: string, doc: BijiDoc): void {
     vpath,
     setTimeout(() => void flush(vpath), PUSH_DEBOUNCE)
   )
+}
+
+function isSameOrChild(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(parent + '/')
+}
+
+async function waitForInflight(path: string): Promise<void> {
+  // 已经发出的 putDoc 无法取消；先等它完成，再重命名/删除，防止旧请求
+  // 在树操作之后落库而把旧节点重新创建。单次请求本身有 8 秒超时。
+  while ([...inflight].some((key) => isSameOrChild(key, path))) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+// 本地重命名/移动后同步调整服务端路径。先迁移尚未发送的内容，避免防抖
+// 保存把旧路径重新创建；失败不会阻塞本地文件操作。
+export async function relocateNode(oldLocalPath: string, newLocalPath: string): Promise<void> {
+  if (!active()) return
+  const oldPath = localToVirtual(oldLocalPath)
+  const newPath = localToVirtual(newLocalPath)
+  if (!oldPath || !newPath || oldPath === newPath) return
+  useSync.getState().relocateNotes(oldLocalPath, newLocalPath)
+
+  for (const [path, doc] of [...pending]) {
+    if (!isSameOrChild(path, oldPath)) continue
+    pending.delete(path)
+    pending.set(newPath + path.slice(oldPath.length), doc)
+  }
+  for (const [path, timer] of [...timers]) {
+    if (!isSameOrChild(path, oldPath)) continue
+    clearTimeout(timer)
+    timers.delete(path)
+    const movedPath = newPath + path.slice(oldPath.length)
+    timers.set(movedPath, setTimeout(() => void flush(movedPath), PUSH_DEBOUNCE))
+  }
+  for (const path of [...knownNodes]) {
+    if (!isSameOrChild(path, oldPath)) continue
+    knownNodes.delete(path)
+    knownNodes.add(newPath + path.slice(oldPath.length))
+  }
+
+  const oldParent = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
+  const newParent = newPath.includes('/') ? newPath.slice(0, newPath.lastIndexOf('/')) : ''
+  try {
+    await waitForInflight(oldPath)
+    if (oldParent === newParent) {
+      await withTimeout(api.rename(oldPath, newPath.slice(newParent ? newParent.length + 1 : 0)), 8000)
+    } else {
+      await withTimeout(api.move(oldPath, newParent), 8000)
+    }
+    noteResult(true)
+  } catch (e) {
+    // 服务端尚未有该节点时，后续保存会在新路径创建它。
+    if (e instanceof ApiError && e.status === 404) noteResult(true)
+    else noteResult(false, e)
+  }
+}
+
+// 删除本地节点后同步删除服务端同路径节点，防止“从云端下载”把已删内容带回。
+export async function removeNode(localPath: string): Promise<void> {
+  if (!active()) return
+  const path = localToVirtual(localPath)
+  if (!path) return
+  useSync.getState().removeNotes(localPath)
+
+  for (const key of [...pending.keys()]) if (isSameOrChild(key, path)) pending.delete(key)
+  for (const [key, timer] of [...timers]) {
+    if (isSameOrChild(key, path)) {
+      clearTimeout(timer)
+      timers.delete(key)
+    }
+  }
+  for (const key of [...knownNodes]) if (isSameOrChild(key, path)) knownNodes.delete(key)
+
+  try {
+    await waitForInflight(path)
+    await withTimeout(api.remove(path), 8000)
+    noteResult(true)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) noteResult(true)
+    else noteResult(false, e)
+  }
 }
 
 async function flush(vpath: string): Promise<void> {
@@ -145,14 +261,18 @@ async function flush(vpath: string): Promise<void> {
   if (!doc) return
   pending.delete(vpath)
   inflight.add(vpath)
+  const localPath = virtualToLocal(vpath)
+  useSync.getState().setNote(localPath, 'syncing')
   useSync.getState().setStatus('syncing')
   try {
     await putWithEnsure(vpath, doc)
     noteResult(true)
     useSync.getState().markSynced()
+    useSync.getState().setNote(localPath, 'synced')
   } catch (e) {
     console.warn('[biji sync] 推送失败', vpath, (e as Error).message)
     noteResult(false, e)
+    useSync.getState().setNote(localPath, 'error', (e as Error).message)
     // 不放回 pending 无限重试:下次保存会重新入队,避免离线时空转堆积。
   } finally {
     inflight.delete(vpath)
@@ -166,17 +286,25 @@ async function flush(vpath: string): Promise<void> {
 }
 
 async function putWithEnsure(vpath: string, doc: BijiDoc): Promise<void> {
+  let remote: { id: string; doc: BijiDoc | null }
   try {
-    await withTimeout(api.putDoc(vpath, doc), 8000)
+    remote = await withTimeout(api.getDoc(vpath), 8000)
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
       knownNodes.delete(vpath)
       await ensureNode(vpath) // 节点不存在 → 建好祖先 + 文件节点再重试一次
-      await withTimeout(api.putDoc(vpath, doc), 8000)
+      remote = await withTimeout(api.getDoc(vpath), 8000)
     } else {
       throw e
     }
   }
+  const localPath = virtualToLocal(vpath)
+  const prepared = await prepareDocForUpload(localPath, remote.id, doc)
+  if (prepared.mappingChanged) {
+    // 只补充资源映射，不改变用户正文的 updatedAt，避免制造一次虚假的编辑。
+    await ipc.fs.write(localPath, JSON.stringify(prepared.localDoc))
+  }
+  await withTimeout(api.putDoc(vpath, prepared.cloudDoc), 8000)
 }
 
 // ---- 拉取(打开文档时)----
@@ -190,14 +318,19 @@ export async function pullDoc(localPath: string, localDoc: BijiDoc): Promise<Bij
     knownNodes.add(vpath)
     noteResult(true)
     if (serverDoc && serverDoc.updatedAt > (localDoc.updatedAt || 0)) {
-      await saveDoc(localPath, serverDoc) // 服务器较新 → 写回本地(旧本地进 .biji-history)
+      const materialized = await materializeCloudAssets(localPath, serverDoc)
+      await saveDoc(localPath, materialized) // 服务器较新 → 写回本地(旧本地进 .biji-history)
       useSync.getState().markSynced()
-      return serverDoc
+      useSync.getState().setNote(localPath, 'synced')
+      return materialized
     }
+    if (!serverDoc || (localDoc.updatedAt || 0) > (serverDoc.updatedAt || 0)) pushDoc(localPath, localDoc)
+    else useSync.getState().setNote(localPath, 'synced')
     return localDoc
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
       noteResult(true) // 服务器连上了,只是还没这篇 → 不算离线
+      pushDoc(localPath, localDoc)
     } else {
       noteResult(false, e)
     }
@@ -279,7 +412,8 @@ export async function pullAll(): Promise<PullAllResult> {
             res.skipped++
             continue
           }
-          await saveDoc(localPath, doc)
+          const materialized = await materializeCloudAssets(localPath, doc)
+          await saveDoc(localPath, materialized)
           res.docs++
         } catch (e) {
           res.errors.push(`${n.path}: ${(e as Error).message}`)

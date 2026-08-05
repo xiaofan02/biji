@@ -496,10 +496,11 @@
   outline: none;
   background: transparent;
   color: var(--text);
-  font-size: 30px;
-  font-weight: 700;
-  line-height: 1.3;
-  margin-bottom: 12px;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+  margin-bottom: 8px;
   font-family: inherit;
 }
 .doc-title-input::placeholder {

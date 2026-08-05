@@ -108,10 +108,10 @@ function GeneralPane() {
           <option value="arabic-dot">1. 2. 3.（数字带点）</option>
           <option value="arabic">1 2 3（纯数字）</option>
           <option value="paren">(1) (2) (3)</option>
-          <option value="cn">一、二、三、（中文）</option>
+          <option value="cn">一、二、三、/ 1.1、1.2（推荐）</option>
           <option value="cn-paren">（一）（二）（三）</option>
         </select>
-        <small>顶栏 # 按钮控制是否显示编号；多级标题如 1.1、一.二 按所选风格逐级转换</small>
+        <small>顶栏 # 按钮控制是否显示编号；推荐格式为一级中文、子级数字</small>
       </div>
     </>
   )

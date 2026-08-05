@@ -54,6 +54,7 @@ function connectSSH(event: IpcMainInvokeEvent, config: SshConfig): Promise<{ id:
 
     const proc = spawn('python', [pythonScript], { stdio: ['pipe', 'pipe', 'pipe'], shell: false })
     let resolved = false
+    let stdoutBuffer = ''
 
     const timeout = setTimeout(() => {
       if (!resolved) {
@@ -74,7 +75,11 @@ function connectSSH(event: IpcMainInvokeEvent, config: SshConfig): Promise<{ id:
     }
 
     proc.stdout.on('data', (data: Buffer) => {
-      const lines = data.toString('utf-8').split('\n')
+      // stdout 的 chunk 边界与 Python 写出的 JSON 行没有关系。保留最后一段
+      // 不完整内容，避免 connected/data/error 消息跨 chunk 时被丢弃。
+      stdoutBuffer += data.toString('utf-8')
+      const lines = stdoutBuffer.split('\n')
+      stdoutBuffer = lines.pop() || ''
       for (const line of lines) {
         if (!line.trim()) continue
         try {

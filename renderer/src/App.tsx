@@ -7,7 +7,7 @@ import { useProviders } from '@/store/useProviders'
 import { usePanes } from '@/store/usePanes'
 import { useAuth } from '@/store/useAuth'
 import { ipc } from '@/lib/ipc'
-import { newDocFlow } from '@/lib/fileOps'
+import { newDocFlow, quickNoteFlow } from '@/lib/fileOps'
 import { normalizeSSHHost, sshHostsNeedMigration } from '@/lib/hosts'
 import { TopBar } from '@/components/layout/TopBar'
 import { ActivityBar } from '@/components/layout/ActivityBar'
@@ -56,6 +56,7 @@ export default function App() {
   useEffect(() => {
     const offs = [
       ipc.menu.on('menu:new-note', () => newDocFlow('')),
+      ipc.menu.on('menu:quick-note', () => void quickNoteFlow()),
       ipc.menu.on('menu:save', () => window.dispatchEvent(new CustomEvent('biji:save'))),
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
       ipc.menu.on('menu:toggle-ai', () => usePanes.getState().focusOrOpen('ai')),

@@ -2,7 +2,8 @@ import { useTabs } from '@/store/useTabs'
 import { useSettings } from '@/store/useSettings'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useAuth } from '@/store/useAuth'
-import { useSync, pushAll, pullAll, type SyncStatus } from '@/lib/sync'
+import { useSync, pushAll, pullAll, pushDoc, type NoteSyncStatus, type SyncStatus } from '@/lib/sync'
+import { loadDoc } from '@/lib/note'
 import { toast } from '@/store/useToast'
 
 // 云端同步状态文案 + 小圆点颜色(本地优先:未登录不显示,登录才出现)
@@ -21,11 +22,35 @@ const SYNC_COLOR: Record<SyncStatus, string> = {
   error: '#e5484d'
 }
 
+const NOTE_SYNC_LABEL: Record<NoteSyncStatus, string> = {
+  pending: '等待上传',
+  syncing: '本篇同步中…',
+  synced: '本篇已同步',
+  error: '本篇同步失败 · 点击重试'
+}
+const NOTE_SYNC_COLOR: Record<NoteSyncStatus, string> = {
+  pending: '#d97706',
+  syncing: '#3370ff',
+  synced: '#2ea043',
+  error: '#e5484d'
+}
+
 export function StatusBar() {
   const active = useTabs((s) => s.tabs.find((t) => t.path === s.activePath) || null)
   const workspace = useSettings((s) => s.workspace)
   const loggedIn = useAuth((s) => s.status === 'in')
   const syncStatus = useSync((s) => s.status)
+  const noteSync = useSync((s) => (active?.kind === 'bnote' ? s.notes[active.path] : undefined))
+
+  const onRetryNote = async () => {
+    if (!active || active.kind !== 'bnote' || noteSync?.status !== 'error') return
+    try {
+      pushDoc(active.path, await loadDoc(active.path))
+      toast('已重新加入上传队列', 'info')
+    } catch (e) {
+      toast('重试失败:' + (e as Error).message, 'error')
+    }
+  }
 
   const onPushAll = async () => {
     toast('正在上传全部到云端…', 'info', 60000)
@@ -67,17 +92,26 @@ export function StatusBar() {
       <span className="spacer" />
       {loggedIn && (
         <>
-          <span title="云端同步状态" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span
+            title={noteSync?.error || (noteSync ? '当前笔记同步状态' : '云端同步状态')}
+            onClick={onRetryNote}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              cursor: noteSync?.status === 'error' ? 'pointer' : 'default'
+            }}
+          >
             <span
               style={{
                 width: 7,
                 height: 7,
                 borderRadius: '50%',
-                background: SYNC_COLOR[syncStatus],
+                background: noteSync ? NOTE_SYNC_COLOR[noteSync.status] : SYNC_COLOR[syncStatus],
                 display: 'inline-block'
               }}
             />
-            {SYNC_LABEL[syncStatus]}
+            {noteSync ? NOTE_SYNC_LABEL[noteSync.status] : SYNC_LABEL[syncStatus]}
           </span>
           <span style={linkStyle} onClick={onPushAll} title="把本机资料库全部上传到云端">
             ↑ 上传全部

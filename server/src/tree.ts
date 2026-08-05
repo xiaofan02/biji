@@ -155,10 +155,17 @@ treeRouter.post(
   asyncHandler(async (req, res) => {
     const { path, destDir = '' } = (req.body ?? {}) as { path?: string; destDir?: string }
     if (!path) throw new HttpError(400, '缺少 path')
+    const targetDir = String(destDir)
     const name = path.split('/').pop() as string
     // 禁止移动到自身或其子目录
-    if (destDir === path || starts(destDir, path + '/')) throw new HttpError(400, '不能移动到自身或其子文件夹')
-    const newPath = await relocate(path, String(destDir), name)
+    if (targetDir === path || starts(targetDir, path + '/')) throw new HttpError(400, '不能移动到自身或其子文件夹')
+    // 根目录可以直接作为目标；其余目标必须是存在的目录，避免产生 parent
+    // 指向不存在节点的“孤儿”记录，导致文件从树中消失。
+    if (targetDir) {
+      const { rows } = await pool.query<{ type: string }>('SELECT type FROM nodes WHERE path=$1', [targetDir])
+      if (!rows.length || rows[0]?.type !== 'dir') throw new HttpError(400, '目标目录不存在')
+    }
+    const newPath = await relocate(path, targetDir, name)
     res.json({ path: newPath })
   })
 )

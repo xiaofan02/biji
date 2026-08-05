@@ -13,6 +13,7 @@ import { moveNode, newDocFlow, isDescendantOrSelf } from '@/lib/fileOps'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
 import { dirname, joinPath } from '@/lib/util'
 import { Icon, type IconName } from '@/components/common/Icon'
+import { relocateNode, removeNode } from '@/lib/sync'
 
 function iconFor(node: TreeNode, open: boolean): IconName {
   if (node.type === 'dir') return open ? 'folder-open' : 'folder'
@@ -60,6 +61,7 @@ async function opRename(node: TreeNode) {
   try {
     await ipc.fs.rename(node.path, newPath)
     useTabs.getState().rename(node.path, newPath)
+    void relocateNode(node.path, newPath)
     await useWorkspace.getState().refresh()
   } catch (e) {
     toast('重命名失败:' + (e as Error).message, 'error')
@@ -82,6 +84,7 @@ async function opDelete(node: TreeNode) {
   try {
     await ipc.fs.delete(node.path)
     useTabs.getState().close(node.path)
+    void removeNode(node.path)
     await useWorkspace.getState().refresh()
   } catch (e) {
     toast('删除失败:' + (e as Error).message, 'error')

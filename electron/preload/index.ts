@@ -16,6 +16,8 @@ const api = {
   fs: {
     list: (dir?: string) => ipcRenderer.invoke('fs:list', dir),
     read: (p: string) => ipcRenderer.invoke('fs:read', p),
+    readBinary: (p: string) => ipcRenderer.invoke('fs:read-binary', p) as Promise<Uint8Array>,
+    writeBinary: (p: string, data: Uint8Array) => ipcRenderer.invoke('fs:write-binary', p, data),
     write: (p: string, content: string) => ipcRenderer.invoke('fs:write', p, content),
     create: (parent: string, name: string, isDir: boolean) => ipcRenderer.invoke('fs:create', parent, name, isDir),
     rename: (oldP: string, newP: string) => ipcRenderer.invoke('fs:rename', oldP, newP),
@@ -86,6 +88,9 @@ const api = {
   },
   sys: {
     openExternal: (url: string) => ipcRenderer.invoke('sys:open-external', url),
+    openPath: (p: string) => ipcRenderer.invoke('sys:open-path', p) as Promise<boolean>,
+    openDataFile: (name: string, dataUrl: string) =>
+      ipcRenderer.invoke('sys:open-data-file', name, dataUrl) as Promise<boolean>,
     showInFolder: (p: string) => ipcRenderer.invoke('sys:show-in-folder', p),
     chooseFile: () => ipcRenderer.invoke('sys:choose-file'),
     chooseFolder: () => ipcRenderer.invoke('sys:choose-folder'),

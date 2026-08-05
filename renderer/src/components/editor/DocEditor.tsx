@@ -9,7 +9,7 @@ import './editor.css'
 import type { BijiDoc } from '@/types'
 import { ipc } from '@/lib/ipc'
 import { bijiSchema } from '@/lib/blocknote'
-import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc, fileUrlFor } from '@/lib/note'
+import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc } from '@/lib/note'
 import { pushDoc } from '@/lib/sync'
 import { shouldSkipSave } from '@/lib/saveGuard'
 import { activeContent } from '@/lib/activeContent'
@@ -34,7 +34,7 @@ function inlineText(content: any): string {
 // 导出用的独立 HTML(内嵌排版样式),供 PDF / Word
 const EXPORT_CSS = `
   body{font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#1f2329;line-height:1.7;}
-  h1{font-size:28px;font-weight:800;margin:0 0 16px;} h2{font-size:22px;margin:24px 0 12px;} h3{font-size:18px;margin:20px 0 10px;}
+  h1{font-size:21px;font-weight:600;margin:16px 0 9px;} h2{font-size:19px;font-weight:600;margin:15px 0 8px;} h3{font-size:17px;font-weight:600;margin:13px 0 7px 24px;}
   p{margin:8px 0;} ul,ol{padding-left:24px;}
   pre{background:#f5f6f7;border:1px solid #dee0e3;border-radius:8px;padding:14px 16px;overflow:auto;font-family:Consolas,Menlo,monospace;font-size:13px;}
   code{font-family:Consolas,Menlo,monospace;}
@@ -77,7 +77,8 @@ function computeHeadingNumbers(headings: Heading[]): Map<string, string> {
   return map
 }
 
-// 把归一编号串(如 "1" / "1.2")按所选风格渲染成显示文本。多级逐级转换。
+// 把归一编号串(如 "1" / "1.2")按所选风格渲染成显示文本。
+// 中文模式采用公文式混合层级：一级“一、”，二级及以下“1.1 / 1.1.1”。
 const CN_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
 function toCn(n: number): string {
   if (n <= 10) return CN_DIGITS[n] ?? String(n)
@@ -93,7 +94,7 @@ function formatHeadingNumber(numStr: string, style: HeadingNumberStyle): string 
     case 'paren':
       return '(' + parts.join('.') + ')'
     case 'cn':
-      return parts.map(toCn).join('.') + '、'
+      return parts.length === 1 ? toCn(parts[0]) + '、' : parts.join('.')
     case 'cn-paren':
       return '（' + parts.map(toCn).join('.') + '）'
     case 'arabic-dot':
@@ -114,6 +115,47 @@ function isBlocksEmpty(blocks: any[]): boolean {
   return true
 }
 
+function localPathFromFileUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'file:') return null
+    let pathname = decodeURIComponent(parsed.pathname)
+    if (/^\/[a-z]:\//i.test(pathname)) pathname = pathname.slice(1)
+    return pathname.replace(/\//g, '\\')
+  } catch {
+    return null
+  }
+}
+
+type ListStartUpdate = { id: string; start: number | undefined }
+
+// BlockNote 默认只给相邻的有序列表连续编号；普通段落会把下一项重置为 1。
+// 这里按“标题章节”计算显式 start：正文可以穿插，遇到标题才开始一组新编号。
+// 子块在各自层级独立计算，避免嵌套列表干扰外层序号。
+function collectContinuousListStarts(blocks: any[], updates: ListStartUpdate[]): void {
+  let nextIndex = 1
+  let previousWasNumbered = false
+
+  for (const block of blocks || []) {
+    if (block?.type === 'heading') {
+      nextIndex = 1
+      previousWasNumbered = false
+    } else if (block?.type === 'numberedListItem') {
+      const wantedStart = previousWasNumbered || nextIndex === 1 ? undefined : nextIndex
+      const currentStart = typeof block.props?.start === 'number' ? block.props.start : undefined
+      if (currentStart !== wantedStart) updates.push({ id: block.id, start: wantedStart })
+      nextIndex++
+      previousWasNumbered = true
+    } else {
+      previousWasNumbered = false
+    }
+
+    if (Array.isArray(block?.children) && block.children.length) {
+      collectContinuousListStarts(block.children, updates)
+    }
+  }
+}
+
 export type DocSource = { type: 'bnote'; doc: BijiDoc } | { type: 'markdown'; text: string }
 
 // 单篇文档的 BlockNote 编辑器(飞书块编辑)。由 DocArea 按 path 作为 key 挂载,切换文档即重建。
@@ -128,6 +170,7 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   const [headings, setHeadings] = useState<Heading[]>([])
   const docAreaRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
+  const normalizingListsRef = useRef(false)
 
   // 标题:存进 BijiDoc.title(受控输入)。
   const [title, setTitle] = useState(seed.title || '')
@@ -147,11 +190,13 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
       initialContent:
         seed.blocks && (seed.blocks as any[]).length ? (blocksForDisplay(seed.blocks as any[], path) as any) : undefined,
       uploadFile: async (file: File) => {
-        // 图片存到笔记同级 assets/ 下,文档里存相对 assets/xxx(blocksForStorage 落盘时改写),返回 file:// 即时显示
-        const buf = new Uint8Array(await file.arrayBuffer())
-        const ext = file.name.split('.').pop() || 'png'
-        const { fullPath } = await ipc.fs.saveImage(path, buf, ext)
-        return fileUrlFor(fullPath)
+        // 单文件笔记模式：附件转为 data URL 直接写进 .bnote，不再创建可见的 assets 文件夹。
+        return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result))
+          reader.onerror = () => reject(reader.error || new Error('读取附件失败'))
+          reader.readAsDataURL(file)
+        })
       }
     },
     []
@@ -216,12 +261,35 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
     [editor, path]
   )
 
+  const normalizeNumberedLists = useMemo(
+    () =>
+      debounce(() => {
+        if (composingRef.current || normalizingListsRef.current) return
+        const updates: ListStartUpdate[] = []
+        collectContinuousListStarts(editor.document as any[], updates)
+        if (!updates.length) return
+
+        normalizingListsRef.current = true
+        try {
+          for (const update of updates) {
+            editor.updateBlock(update.id, { props: { start: update.start } } as any)
+          }
+        } finally {
+          queueMicrotask(() => {
+            normalizingListsRef.current = false
+          })
+        }
+      }, 80),
+    [editor]
+  )
+
   const onContentChange = () => {
     dirtyRef.current = true
     setModified(path, true)
     autosave()
     publishContext()
     updateOutline()
+    if (!normalizingListsRef.current) normalizeNumberedLists()
   }
 
   // 卸载时兜底落盘:还有未保存改动就立即写回(被 suppressSave 抑制的旧路径会在 saveNow 内跳过)
@@ -253,6 +321,7 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   useEffect(() => {
     publishContext()
     updateOutline()
+    normalizeNumberedLists()
     return () => activeContent.clear(path)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -400,6 +469,75 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 斜杠命令菜单的选项本身会循环选择，但从末项回到首项时，第三方菜单偶尔不会同步
+  // 重置滚动位置，视觉上像是方向键失效。记录循环边界，并在菜单完成选中更新后校正滚动。
+  useEffect(() => {
+    const root = docAreaRef.current
+    if (!root) return
+
+    const onSuggestionKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+      const menu = document.getElementById('bn-suggestion-menu')
+      if (!menu) return
+
+      const options = Array.from(menu.querySelectorAll<HTMLElement>('[role="option"]'))
+      if (options.length === 0) return
+      const selectedIndex = options.findIndex((option) => option.getAttribute('aria-selected') === 'true')
+      const wrapsToStart = event.key === 'ArrowDown' && selectedIndex === options.length - 1
+      const wrapsToEnd = event.key === 'ArrowUp' && selectedIndex === 0
+      if (!wrapsToStart && !wrapsToEnd) return
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          menu.scrollTop = wrapsToStart ? 0 : menu.scrollHeight
+          menu.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+        })
+      })
+    }
+
+    root.addEventListener('keydown', onSuggestionKeyDown, true)
+    return () => root.removeEventListener('keydown', onSuggestionKeyDown, true)
+  }, [])
+
+  // 本地附件使用 contenteditable 内的文件块展示，浏览器默认不会替我们调用系统程序。
+  // 双击已上传的文件块时，根据块 URL 取回工作区内的真实路径并交给系统默认应用打开。
+  useEffect(() => {
+    const root = docAreaRef.current
+    if (!root) return
+
+    const onDoubleClick = async (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      const fileContent = target?.closest<HTMLElement>('[data-content-type="file"]')
+      const blockElement = fileContent?.closest<HTMLElement>('.bn-block[data-id]')
+      const blockId = blockElement?.dataset.id
+      if (!blockId) return
+
+      const block = editor.getBlock(blockId) as any
+      if (!block || block.type !== 'file' || !block.props?.url) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      const url = String(block.props.url)
+      try {
+        const localPath = localPathFromFileUrl(url)
+        if (/^data:/i.test(url)) {
+          await ipc.sys.openDataFile(String(block.props.name || '附件'), url)
+        } else if (localPath) {
+          await ipc.sys.openPath(localPath)
+        } else if (/^https?:/i.test(url)) {
+          await ipc.sys.openExternal(url)
+        } else {
+          throw new Error('无法识别附件地址')
+        }
+      } catch (error) {
+        toast(`打开附件失败：${(error as Error).message}`, 'error')
+      }
+    }
+
+    root.addEventListener('dblclick', onDoubleClick)
+    return () => root.removeEventListener('dblclick', onDoubleClick)
+  }, [editor])
+
   return (
     <div className="doc-with-outline">
       {outlineOpen && headings.length > 0 && (
@@ -438,6 +576,8 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
           {headingNumbers && <HeadingNumbers scrollRef={docAreaRef} numbers={headingNums} />}
         </div>
         <CodeBlockCopy containerRef={docAreaRef} />
+        <CodeBlockInsertAfter containerRef={docAreaRef} editor={editor} />
+        <CodeSelectionColorToolbar containerRef={docAreaRef} editor={editor} />
       </div>
     </div>
   )
@@ -578,6 +718,263 @@ function CodeBlockCopy({ containerRef }: { containerRef: React.RefObject<HTMLDiv
 // 每个代码块在其 <pre> 左侧放一列行号:行号槽 top 对齐 <pre> 顶部、采用与代码相同的 line-height 与
 // padding-top,故逐行对齐(代码块 white-space:pre 不换行,一个 \n = 一视觉行)。行号槽是滚动容器
 // .doc-scroll 的绝对定位子节点,会随内容一起滚动,故无需监听滚动,只在内容/尺寸变化时重算。
+function CodeBlockInsertAfter({
+  containerRef,
+  editor
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  editor: any
+}) {
+  const [target, setTarget] = useState<{ top: number; left: number; blockId: string } | null>(null)
+
+  useEffect(() => {
+    const root = containerRef.current
+    if (!root) return
+
+    const onMove = (event: MouseEvent) => {
+      if ((event.target as HTMLElement | null)?.closest?.('.code-insert-after')) return
+
+      const codeBlocks = Array.from(root.querySelectorAll<HTMLElement>('[data-content-type="codeBlock"]'))
+      for (const codeBlock of codeBlocks) {
+        const block = codeBlock.closest<HTMLElement>('.bn-block[data-id]')
+        const outer = codeBlock.closest<HTMLElement>('.bn-block-outer')
+        const blockId = block?.dataset.id
+        if (!outer || !blockId) continue
+
+        const rect = codeBlock.getBoundingClientRect()
+        const nextRect = (outer.nextElementSibling as HTMLElement | null)?.getBoundingClientRect()
+        const gapTop = rect.bottom
+        const gapBottom = nextRect?.top ?? rect.bottom + 42
+        if (event.clientY < gapTop - 5 || event.clientY > Math.max(gapTop + 24, gapBottom + 5)) continue
+        if (event.clientX < rect.left || event.clientX > rect.right) continue
+
+        const width = 110
+        setTarget({
+          top: gapTop + Math.max(4, (gapBottom - gapTop - 26) / 2),
+          left: Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8)),
+          blockId
+        })
+        return
+      }
+      setTarget(null)
+    }
+
+    const hide = () => setTarget(null)
+    root.addEventListener('mousemove', onMove)
+    root.addEventListener('mouseleave', hide)
+    root.addEventListener('scroll', hide, true)
+    return () => {
+      root.removeEventListener('mousemove', onMove)
+      root.removeEventListener('mouseleave', hide)
+      root.removeEventListener('scroll', hide, true)
+    }
+  }, [containerRef])
+
+  if (!target) return null
+
+  const insertParagraph = () => {
+    const block = editor.getBlock(target.blockId)
+    if (!block) return
+    const nextBlock = editor.getNextBlock(target.blockId)
+    if (nextBlock?.type === 'paragraph' && inlineText(nextBlock.content).trim() === '') {
+      editor.setTextCursorPosition(nextBlock, 'start')
+    } else {
+      const [paragraph] = editor.insertBlocks([{ type: 'paragraph' }], block, 'after')
+      editor.setTextCursorPosition(paragraph, 'start')
+    }
+    setTarget(null)
+    editor.focus()
+  }
+
+  return (
+    <button
+      className="code-insert-after"
+      style={{ top: target.top, left: target.left }}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={insertParagraph}
+      title="在代码块后添加普通文本"
+    >
+      <span>＋</span> 添加正文
+    </button>
+  )
+}
+
+const CODE_MARK_COLORS = [
+  { value: 'gray', label: '灰色', hex: '#8f959e' },
+  { value: 'red', label: '红色', hex: '#f54a45' },
+  { value: 'orange', label: '橙色', hex: '#f6a21a' },
+  { value: 'yellow', label: '黄色', hex: '#f5cf3d' },
+  { value: 'green', label: '绿色', hex: '#34a853' },
+  { value: 'blue', label: '蓝色', hex: '#3370ff' },
+  { value: 'purple', label: '紫色', hex: '#8b5cf6' }
+]
+
+// BlockNote 会主动隐藏代码节点内的通用格式工具栏，因此为代码片段提供独立色板。
+function CodeSelectionColorToolbar({
+  containerRef,
+  editor
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>
+  editor: any
+}) {
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null)
+  const [palette, setPalette] = useState<'text' | 'background' | null>(null)
+
+  useEffect(() => {
+    const root = containerRef.current
+    if (!root) return
+
+    const update = () => {
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setPosition(null)
+        setPalette(null)
+        return
+      }
+
+      const range = selection.getRangeAt(0)
+      const ancestor = range.commonAncestorContainer
+      const element = ancestor.nodeType === Node.ELEMENT_NODE ? (ancestor as Element) : ancestor.parentElement
+      const codeBlock = element?.closest?.('[data-content-type="codeBlock"]')
+      if (!codeBlock || !root.contains(codeBlock)) {
+        setPosition(null)
+        setPalette(null)
+        return
+      }
+
+      const rect = range.getBoundingClientRect()
+      if (!rect.width && !rect.height) return
+      const toolbarWidth = 190
+      const left = Math.max(8, Math.min(rect.left + rect.width / 2 - toolbarWidth / 2, window.innerWidth - toolbarWidth - 8))
+      const top = rect.top > 58 ? rect.top - 42 : rect.bottom + 8
+      setPosition({ top, left })
+    }
+
+    document.addEventListener('selectionchange', update)
+    window.addEventListener('resize', update)
+    root.addEventListener('scroll', update, true)
+    return () => {
+      document.removeEventListener('selectionchange', update)
+      window.removeEventListener('resize', update)
+      root.removeEventListener('scroll', update, true)
+    }
+  }, [containerRef])
+
+  useEffect(() => {
+    const root = containerRef.current
+    if (!root) return
+
+    const handleCodeKeyboard = (event: KeyboardEvent) => {
+      if (event.isComposing) return
+      let cursor: any
+      try {
+        cursor = editor.getTextCursorPosition()
+      } catch {
+        return
+      }
+
+      const isCodeBlock = cursor.block.type === 'codeBlock'
+      const isImageBlock = cursor.block.type === 'image'
+      if (!isCodeBlock && !isImageBlock) return
+
+      if (event.key === 'ArrowDown' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        // 仅在代码块或图片已是文档末尾时，把 ↓ 当作“继续写普通正文”。
+        // 当前块后已有标题、正文或其他块时，保留方向键原本的光标移动行为；
+        // 若要在两个已有内容块之间插入正文，使用悬停出现的“添加正文”按钮。
+        if (cursor.nextBlock) return
+
+        if (isCodeBlock) {
+          const isOnLastLine = editor.transact((tr: any) => {
+            if (!tr.selection.empty) return false
+            const parent = tr.selection.$from.parent
+            const textAfterCursor = parent.textContent.slice(tr.selection.$from.parentOffset)
+            return !textAfterCursor.includes('\n')
+          })
+          if (!isOnLastLine) return
+        }
+
+        event.preventDefault()
+        event.stopPropagation()
+        const [paragraph] = editor.insertBlocks([{ type: 'paragraph' }], cursor.block, 'after')
+        editor.setTextCursorPosition(paragraph, 'start')
+        return
+      }
+
+      if (!isCodeBlock) return
+      if (event.key !== 'Enter' || event.shiftKey) return
+      const activeStyles = editor.getActiveStyles()
+      if (!activeStyles.textColor && !activeStyles.backgroundColor) return
+
+      // 在同一个事务内完成“插入换行 + 清除光标颜色”。若先让默认回车执行再补救，
+      // ProseMirror 可能已经从换行前字符重新推导颜色，导致下一次输入继续继承。
+      event.preventDefault()
+      event.stopPropagation()
+      editor.transact((tr: any) => {
+        tr.insertText('\n')
+        const activeMarks = tr.storedMarks ?? tr.selection.$from.marks()
+        tr.setStoredMarks(
+          activeMarks.filter((mark: any) => mark.type.name !== 'textColor' && mark.type.name !== 'backgroundColor')
+        )
+      })
+    }
+
+    root.addEventListener('keydown', handleCodeKeyboard, true)
+    return () => root.removeEventListener('keydown', handleCodeKeyboard, true)
+  }, [containerRef, editor])
+
+  if (!position) return null
+
+  const applyColor = (kind: 'text' | 'background', value?: string) => {
+    if (value) {
+      editor.addStyles(kind === 'text' ? { textColor: value } : { backgroundColor: value })
+    } else {
+      editor.removeStyles(kind === 'text' ? { textColor: 'default' } : { backgroundColor: 'default' })
+    }
+    setPalette(null)
+    requestAnimationFrame(() => editor.focus())
+  }
+
+  return (
+    <div
+      className="code-color-toolbar"
+      style={{ top: position.top, left: position.left }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <button className="code-color-trigger" onClick={() => setPalette(palette === 'text' ? null : 'text')}>
+        <span className="code-color-a">A</span>
+        文字色
+      </button>
+      <button
+        className="code-color-trigger"
+        onClick={() => setPalette(palette === 'background' ? null : 'background')}
+      >
+        <span className="code-color-highlight">A</span>
+        背景色
+      </button>
+      {palette && (
+        <div className="code-color-palette">
+          <div className="code-color-palette-title">{palette === 'text' ? '文字颜色' : '背景重点色'}</div>
+          <div className="code-color-swatches">
+            {CODE_MARK_COLORS.map((color) => (
+              <button
+                key={color.value}
+                className="code-color-swatch"
+                title={color.label}
+                aria-label={color.label}
+                style={{ backgroundColor: color.hex }}
+                onClick={() => applyColor(palette, color.value)}
+              />
+            ))}
+            <button className="code-color-clear" title="清除颜色" onClick={() => applyColor(palette)}>
+              清除
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CodeGutters({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   type G = {
     key: string
