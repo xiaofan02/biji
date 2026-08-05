@@ -1,5 +1,5 @@
 {
-  "name": "biji",
+  "name": "moqi",
   "version": "0.2.0",
   "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
   "main": "app-build/main/index.js",
@@ -12,8 +12,8 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
     "start:legacy": "electron main.js"
   },
   "dependencies": {
@@ -102,10 +102,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "墨启 MOQI",
-      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}"
+      "artifactName": "MOQI-${version}-${arch}-Setup.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-${arch}-Portable.${ext}"
+      "artifactName": "MOQI-${version}-${arch}-Portable.${ext}"
     },
     "mac": {
       "target": "dmg",

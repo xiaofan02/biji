@@ -25,8 +25,8 @@
 ### Windows (推荐)
 
 到 [Releases 页面](../../releases) 下载最新版本:
-- `墨启 MOQI-x.x.x-x64-Setup.exe` - 安装版（支持应用内更新）
-- `墨启 MOQI-x.x.x-x64-Portable.exe` - 便携版（单文件，免安装）
+- `MOQI-x.x.x-x64-Setup.exe` - 安装版（支持应用内更新）
+- `MOQI-x.x.x-x64-Portable.exe` - 便携版（单文件，免安装）
 
 首次需要手动安装带更新功能的 0.2.0 版本。此后的正式版本会发布到 GitHub Releases，可在应用顶栏点击“更新”完成检查、下载与安装。
 
