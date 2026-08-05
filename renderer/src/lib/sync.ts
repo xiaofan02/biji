@@ -144,22 +144,32 @@ async function ensureNode(vpath: string): Promise<void> {
 const pending = new Map<string, BijiDoc>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
 const inflight = new Set<string>()
+const retryAttempts = new Map<string, number>()
 const PUSH_DEBOUNCE = 1500
+const RETRY_DELAYS = [3000, 10_000, 30_000, 60_000]
+
+function scheduleFlush(vpath: string, delay = PUSH_DEBOUNCE): void {
+  const current = timers.get(vpath)
+  if (current) clearTimeout(current)
+  timers.set(vpath, setTimeout(() => void flush(vpath), delay))
+}
 
 // 保存成功后调用:把本地文档尽力上传到云端。永不 throw、永不阻塞编辑。
 export function pushDoc(localPath: string, doc: BijiDoc): void {
-  if (!active()) return
+  if (!useSync.getState().enabled) return
   const vpath = localToVirtual(localPath)
   if (!vpath) return
   useSync.getState().setNote(localPath, 'pending')
   pending.set(vpath, doc)
-  const t = timers.get(vpath)
-  if (t) clearTimeout(t)
-  timers.set(
-    vpath,
-    setTimeout(() => void flush(vpath), PUSH_DEBOUNCE)
-  )
+  if (active()) scheduleFlush(vpath)
 }
+
+// 登出或临时断线期间保存的内容继续留在内存队列；重新登录后自动恢复上传。
+useAuth.subscribe((state, previous) => {
+  if (state.status !== 'in' || previous.status === 'in') return
+  knownOffline = false
+  for (const vpath of pending.keys()) if (!timers.has(vpath)) scheduleFlush(vpath, 100)
+})
 
 function isSameOrChild(path: string, parent: string): boolean {
   return path === parent || path.startsWith(parent + '/')
@@ -193,6 +203,11 @@ export async function relocateNode(oldLocalPath: string, newLocalPath: string): 
     timers.delete(path)
     const movedPath = newPath + path.slice(oldPath.length)
     timers.set(movedPath, setTimeout(() => void flush(movedPath), PUSH_DEBOUNCE))
+  }
+  for (const [path, attempts] of [...retryAttempts]) {
+    if (!isSameOrChild(path, oldPath)) continue
+    retryAttempts.delete(path)
+    retryAttempts.set(newPath + path.slice(oldPath.length), attempts)
   }
   for (const path of [...knownNodes]) {
     if (!isSameOrChild(path, oldPath)) continue
@@ -232,6 +247,7 @@ export async function removeNode(localPath: string): Promise<void> {
     }
   }
   for (const key of [...knownNodes]) if (isSameOrChild(key, path)) knownNodes.delete(key)
+  for (const key of [...retryAttempts.keys()]) if (isSameOrChild(key, path)) retryAttempts.delete(key)
 
   try {
     await waitForInflight(path)
@@ -246,15 +262,11 @@ export async function removeNode(localPath: string): Promise<void> {
 async function flush(vpath: string): Promise<void> {
   timers.delete(vpath)
   if (!active()) {
-    pending.delete(vpath)
     return
   }
   if (inflight.has(vpath)) {
     // 上一次还在飞:稍后重排,保证最新内容最终送达
-    timers.set(
-      vpath,
-      setTimeout(() => void flush(vpath), PUSH_DEBOUNCE)
-    )
+    scheduleFlush(vpath)
     return
   }
   const doc = pending.get(vpath)
@@ -266,6 +278,7 @@ async function flush(vpath: string): Promise<void> {
   useSync.getState().setStatus('syncing')
   try {
     await putWithEnsure(vpath, doc)
+    retryAttempts.delete(vpath)
     noteResult(true)
     useSync.getState().markSynced()
     useSync.getState().setNote(localPath, 'synced')
@@ -273,14 +286,15 @@ async function flush(vpath: string): Promise<void> {
     console.warn('[biji sync] 推送失败', vpath, (e as Error).message)
     noteResult(false, e)
     useSync.getState().setNote(localPath, 'error', (e as Error).message)
-    // 不放回 pending 无限重试:下次保存会重新入队,避免离线时空转堆积。
+    // 保留最新内容并退避重试。用户无需反复点击上传；最长每分钟尝试一次，避免离线时空转。
+    if (!pending.has(vpath)) pending.set(vpath, doc)
+    const attempt = retryAttempts.get(vpath) ?? 0
+    retryAttempts.set(vpath, attempt + 1)
+    if (active()) scheduleFlush(vpath, RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)])
   } finally {
     inflight.delete(vpath)
     if (pending.has(vpath) && !timers.has(vpath)) {
-      timers.set(
-        vpath,
-        setTimeout(() => void flush(vpath), PUSH_DEBOUNCE)
-      )
+      scheduleFlush(vpath)
     }
   }
 }
@@ -344,7 +358,24 @@ export async function pushAll(): Promise<MigrateResult> {
   knownOffline = false
   useSync.getState().setStatus('syncing')
   try {
+    // 避免自动队列与全量上传同时覆盖同一文档；已发出的请求先等待完成。
+    for (const timer of timers.values()) clearTimeout(timer)
+    timers.clear()
+    while (inflight.size) await new Promise<void>((resolve) => setTimeout(resolve, 50))
     const r = await migrateLocalLibrary()
+    for (const vpath of r.syncedPaths) {
+      pending.delete(vpath)
+      retryAttempts.delete(vpath)
+      knownNodes.add(vpath)
+      useSync.getState().setNote(virtualToLocal(vpath), 'synced')
+    }
+    for (const failure of r.failures) {
+      if (!failure.path.toLowerCase().endsWith('.bnote')) continue
+      const localPath = virtualToLocal(failure.path)
+      useSync.getState().setNote(localPath, 'error', failure.error)
+      const doc = pending.get(failure.path)
+      if (doc && !timers.has(failure.path)) scheduleFlush(failure.path, RETRY_DELAYS[0])
+    }
     noteResult(true)
     useSync.getState().markSynced()
     return r

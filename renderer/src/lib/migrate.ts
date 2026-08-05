@@ -9,6 +9,8 @@ export interface MigrateResult {
   docs: number
   skipped: number
   errors: string[]
+  syncedPaths: string[]
+  failures: Array<{ path: string; error: string }>
 }
 
 // 把本机工作区(useSettings.workspace,绝对路径)里的文件夹 + .bnote 文档一次性导入服务器协同库。
@@ -41,7 +43,13 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
   const serverPaths = new Set<string>()
   collectServerPaths(await api.tree(), serverPaths)
 
-  const res: MigrateResult = { dirs: 0, docs: 0, skipped: 0, errors: [] }
+  const res: MigrateResult = { dirs: 0, docs: 0, skipped: 0, errors: [], syncedPaths: [], failures: [] }
+
+  const fail = (path: string, error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error)
+    res.errors.push(`${path}: ${message}`)
+    res.failures.push({ path, error: message })
+  }
 
   // 自顶向下:先建父目录再建其子节点,保证 createNode 的 parent 已存在。
   const walk = async (nodes: TreeNode[], parentVirtual: string): Promise<void> => {
@@ -57,7 +65,7 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
             res.dirs++
             onProgress?.(`文件夹 ${vpath}`)
           } catch (e) {
-            res.errors.push(`${vpath}: ${(e as Error).message}`)
+            fail(vpath, e)
             continue // 父目录建失败就别再钻进去建子节点
           }
         }
@@ -67,7 +75,7 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
           const raw = await ipc.fs.read(n.path)
           const doc = raw ? JSON.parse(raw) : null
           if (!doc || doc.schema !== 'biji-doc' || !Array.isArray(doc.blocks)) {
-            res.errors.push(`${vpath}: 不是有效的 .bnote`)
+            fail(vpath, '不是有效的 .bnote')
             continue
           }
           let targetPath = vpath
@@ -86,9 +94,10 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
           if (prepared.mappingChanged) await ipc.fs.write(n.path, JSON.stringify(prepared.localDoc))
           await api.putDoc(targetPath, prepared.cloudDoc)
           res.docs++
+          res.syncedPaths.push(targetPath)
           onProgress?.(`文档 ${vpath}`)
         } catch (e) {
-          res.errors.push(`${vpath}: ${(e as Error).message}`)
+          fail(vpath, e)
         }
       }
       // 其他文件类型(.md/代码/图片)本期不迁移

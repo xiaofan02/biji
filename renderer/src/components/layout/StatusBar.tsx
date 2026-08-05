@@ -57,7 +57,12 @@ export function StatusBar() {
     try {
       const r = await pushAll()
       const tail = (r.skipped ? `,跳过 ${r.skipped}` : '') + (r.errors.length ? `,${r.errors.length} 个失败` : '')
-      toast(`已上传:${r.docs} 篇文档、${r.dirs} 个文件夹${tail}`, r.errors.length ? 'error' : 'success', 5000)
+      const detail = r.errors.length ? `；${r.errors.slice(0, 2).join('；')}` : ''
+      toast(
+        `已上传:${r.docs} 篇文档、${r.dirs} 个文件夹${tail}${detail}`,
+        r.errors.length ? 'error' : 'success',
+        r.errors.length ? 12_000 : 5000
+      )
     } catch (e) {
       toast('上传失败:' + (e as Error).message, 'error')
     }

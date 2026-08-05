@@ -34,6 +34,33 @@ function isCloudAsset(url: string): boolean {
   return /^\/api\/assets\/[a-f0-9-]+(?:[?#].*)?$/i.test(url)
 }
 
+function isInlineData(url: string): boolean {
+  return /^data:/i.test(url)
+}
+
+function isInlineRef(key: string): boolean {
+  return key.startsWith('inline:sha256:')
+}
+
+async function inlineAsset(url: string): Promise<{ blob: Blob; key: string }> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('读取内嵌附件失败')
+  const blob = await response.blob()
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+  return { blob, key: `inline:sha256:${hex}` }
+}
+
+async function responseToDataUrl(response: Response): Promise<string> {
+  const blob = await response.blob()
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error || new Error('恢复内嵌附件失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 function mimeFor(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase()
   return (
@@ -69,6 +96,15 @@ export async function prepareDocForUpload(localPath: string, nodeId: string, doc
   const refs = { ...(doc.assetRefs || {}) }
   let mappingChanged = false
   const blocks = await mapBlockUrls(doc.blocks as any[], async (url) => {
+    if (isInlineData(url)) {
+      const { blob, key } = await inlineAsset(url)
+      if (refs[key]) return refs[key]
+      const uploaded = await api.uploadImage(blob, `inline-${key.slice(-16)}.${extForMime(blob.type)}`, nodeId)
+      refs[key] = uploaded.path
+      mappingChanged = true
+      return uploaded.path
+    }
+
     const rel = localAssetPath(url)
     if (!rel) return url
     if (refs[rel]) return refs[rel]
@@ -109,6 +145,11 @@ export async function materializeCloudAssets(localPath: string, doc: BijiDoc): P
     if (!isCloudAsset(url)) return url
     let rel = reverse.get(url)
     let response: Response | null = null
+    if (rel && isInlineRef(rel)) {
+      response = await fetch(api.assetUrl(url))
+      if (!response.ok) throw new Error(`附件下载失败 (${response.status})`)
+      return responseToDataUrl(response)
+    }
     if (!rel) {
       response = await fetch(api.assetUrl(url))
       if (!response.ok) throw new Error(`图片下载失败 (${response.status})`)
