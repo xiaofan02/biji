@@ -11,6 +11,7 @@
     "build": "npm run clean && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
+    "smoke:collab": "node scripts/collab-smoke.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",

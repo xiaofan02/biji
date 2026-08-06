@@ -115,6 +115,8 @@ export async function createCollaborationSession(
     name: prepared.id,
     document,
     token: auth.token,
+    // 每篇文档当前各自持有连接；切换/关闭文档时必须真正关掉底层 WebSocket，避免后台泄漏连接。
+    preserveConnection: false,
     onStatus: ({ status }) => {
       useCollaboration.getState().setDocument(path, {
         status: status === 'connected' ? 'connecting' : status === 'connecting' ? 'connecting' : 'offline'
@@ -137,6 +139,8 @@ export async function createCollaborationSession(
     document,
     provider,
     destroy: () => {
+      provider.disconnect()
+      provider.configuration.websocketProvider.destroy()
       provider.destroy()
       document.destroy()
       useCollaboration.getState().removeDocument(path)
