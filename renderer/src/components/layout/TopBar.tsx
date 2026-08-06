@@ -95,6 +95,7 @@ export function TopBar() {
       await refresh()
       openTab(path)
       setActivePath(path)
+      focusOrOpen('editor')
     } catch (e) {
       toast('新建失败:' + (e as Error).message, 'error')
     }
@@ -103,6 +104,7 @@ export function TopBar() {
   const openResult = (path: string) => {
     openTab(path)
     setActivePath(path)
+    focusOrOpen('editor')
     setShowResults(false)
     if (inputRef.current) inputRef.current.value = ''
   }

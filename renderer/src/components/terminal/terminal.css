@@ -224,6 +224,21 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.qc-save-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.qc-save-option input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
 .qc-foot {
   display: flex;
   justify-content: flex-end;

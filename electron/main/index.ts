@@ -24,6 +24,7 @@ const store = new Store({
     activeProvider: null,
     sshHosts: [],
     telnetHosts: [],
+    serialHosts: [],
     // 团队协同:服务器地址 + 上次登录用户名(令牌另经 safeStorage 加密存储,见 secure:* IPC)
     serverUrl: '',
     lastUsername: ''
@@ -539,7 +540,7 @@ ipcMain.handle('serial:list', async () => {
 ipcMain.handle('serial:connect', async (_e, cfg: { path: string; baudRate?: number }) => {
   const SP = loadSerialPort()
   if (!SP)
-    throw new Error('串口模块未就绪:请先安装并为 Electron 重建 — npm i serialport 后 npx @electron/rebuild -f -w serialport')
+    throw new Error('串口组件加载失败，请重新安装最新版墨启 MOQI')
   const id = `serial-${process.pid}-${Date.now()}`
   const port = new SP({ path: cfg.path, baudRate: cfg.baudRate || 9600 })
   serialSessions.set(id, port)

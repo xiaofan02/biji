@@ -1,5 +1,6 @@
 import { useTabs } from '@/store/useTabs'
 import { useWorkspace } from '@/store/useWorkspace'
+import { usePanes } from '@/store/usePanes'
 import { Icon } from '@/components/common/Icon'
 
 export function Tabs() {
@@ -8,12 +9,14 @@ export function Tabs() {
   const setActive = useTabs((s) => s.setActive)
   const close = useTabs((s) => s.close)
   const setActivePath = useWorkspace((s) => s.setActivePath)
+  const focusOrOpen = usePanes((s) => s.focusOrOpen)
 
   if (!tabs.length) return null
 
   const onActivate = (path: string) => {
     setActive(path)
     setActivePath(path)
+    focusOrOpen('editor')
   }
 
   return (

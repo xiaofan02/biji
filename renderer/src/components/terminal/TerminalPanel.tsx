@@ -9,7 +9,7 @@ import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
 import { usePanes } from '@/store/usePanes'
 import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
-import type { SSHHost, TelnetHost } from '@/types'
+import type { SSHHost, TelnetHost, SerialHost } from '@/types'
 import './terminal.css'
 
 // 一个终端会话标签:每个标签 = 一台设备的独立连接(独立 xterm + 独立后端 session id),互不影响。
@@ -356,8 +356,8 @@ function TermSession({ tab, active, theme }: { tab: SessionTab; active: boolean;
 // ============ 会话管理器(CRT 式):按 group 路径构建文件夹树 ============
 interface HostLeaf {
   id: string // `${kind}:${host.id}`,既作连接 key 也作"已连接"标记
-  kind: 'ssh' | 'telnet'
-  host: SSHHost | TelnetHost
+  kind: 'ssh' | 'telnet' | 'serial'
+  host: SSHHost | TelnetHost | SerialHost
   name: string
   group: string
 }
@@ -399,7 +399,12 @@ function allFolderPaths(f: TreeFolder, out: string[] = []): string[] {
   return out
 }
 function hostAddr(h: HostLeaf): string {
-  return `${(h.host as any).host}:${h.host.port}`
+  if (h.kind === 'serial') {
+    const serial = h.host as SerialHost
+    return `${serial.path}@${serial.baudRate}`
+  }
+  const network = h.host as SSHHost | TelnetHost
+  return `${network.host}:${network.port}`
 }
 
 // 递归渲染文件夹与主机行。folders 显示展开箭头;hosts 缩进对齐到箭头之后。
@@ -575,8 +580,9 @@ export function TerminalPanel() {
   const loadHosts = () => {
     Promise.all([
       ipc.settings.get('sshHosts') as Promise<any[]>,
-      ipc.settings.get('telnetHosts') as Promise<TelnetHost[]>
-    ]).then(([ssh, telnet]) => {
+      ipc.settings.get('telnetHosts') as Promise<TelnetHost[]>,
+      ipc.settings.get('serialHosts') as Promise<SerialHost[]>
+    ]).then(([ssh, telnet, serial]) => {
       const next: HostLeaf[] = [
         ...((ssh as any[]) || []).map((raw) => {
           const h = normalizeSSHHost(raw)
@@ -588,12 +594,23 @@ export function TerminalPanel() {
           host: h,
           name: h.name,
           group: h.group || ''
+        })),
+        ...((serial as SerialHost[]) || []).map((h) => ({
+          id: `serial:${h.id}`,
+          kind: 'serial' as const,
+          host: h,
+          name: h.name,
+          group: h.group || ''
         }))
       ]
       setLeaves(next)
     })
   }
   useEffect(loadHosts, [])
+  useEffect(() => {
+    window.addEventListener('biji:terminal-hosts-changed', loadHosts)
+    return () => window.removeEventListener('biji:terminal-hosts-changed', loadHosts)
+  }, [])
 
   const importSessions = async () => {
     const paths = await ipc.sys.chooseSessionFiles()
@@ -650,9 +667,12 @@ export function TerminalPanel() {
         privateKeyPath: h.auth === 'key' ? h.privateKeyPath : undefined,
         passphrase: h.auth === 'key' ? h.passphrase : undefined
       }
-    } else {
+    } else if (leaf.kind === 'telnet') {
       const h = leaf.host as TelnetHost
       cfg = { host: h.host, port: h.port }
+    } else {
+      const h = leaf.host as SerialHost
+      cfg = { path: h.path, baudRate: h.baudRate }
     }
     const key = `t${_seq++}`
     setTabs((prev) => [...prev, { key, kind: leaf.kind, name: leaf.name || hostAddr(leaf), originId: leaf.id, cfg }])
@@ -690,13 +710,21 @@ export function TerminalPanel() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [tabs])
 
-  // 快速连接(Alt+Q)发来的连接请求:新开一个会话标签(不入主机列表)
+  // 快速连接(Alt+Q)发来的连接请求:新开会话；若用户勾选保存，会携带会话管理器 originId。
   useEffect(() => {
     const onConnect = (e: Event) => {
-      const d = (e as CustomEvent).detail as { kind: 'ssh' | 'telnet' | 'serial'; cfg: any; name: string }
+      const d = (e as CustomEvent).detail as {
+        kind: 'ssh' | 'telnet' | 'serial'
+        cfg: any
+        name: string
+        originId?: string
+      }
       if (!d?.cfg) return
       const key = `t${_seq++}`
-      setTabs((prev) => [...prev, { key, kind: d.kind, name: d.name, originId: `quick:${d.name}`, cfg: d.cfg }])
+      setTabs((prev) => [
+        ...prev,
+        { key, kind: d.kind, name: d.name, originId: d.originId || `quick:${d.name}`, cfg: d.cfg }
+      ])
       setActiveKey(key)
     }
     window.addEventListener('biji:terminal-connect', onConnect)

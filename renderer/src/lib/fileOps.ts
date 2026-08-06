@@ -4,6 +4,7 @@ import { createDoc } from '@/lib/note'
 import { prompt } from '@/store/usePrompt'
 import { useTabs } from '@/store/useTabs'
 import { useWorkspace } from '@/store/useWorkspace'
+import { usePanes } from '@/store/usePanes'
 import { useSettings } from '@/store/useSettings'
 import { toast } from '@/store/useToast'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
@@ -23,6 +24,7 @@ function quickNoteName(now = new Date()): string {
 export async function newDocFlow(dir: string): Promise<void> {
   const name = await prompt('新建文档名称', '未命名文档')
   if (name === null) return
+  usePanes.getState().focusOrOpen('editor')
   try {
     const path = await createDoc(dir, name)
     await useWorkspace.getState().refresh()
@@ -44,6 +46,7 @@ export async function quickNoteFlow(): Promise<void> {
     await useWorkspace.getState().refresh()
     useTabs.getState().open(path)
     useWorkspace.getState().setActivePath(path)
+    usePanes.getState().focusOrOpen('editor')
   } catch (e) {
     toast('创建随手记失败:' + (e as Error).message, 'error')
   }

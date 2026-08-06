@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import type { TreeNode } from '@/types'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useTabs } from '@/store/useTabs'
+import { usePanes } from '@/store/usePanes'
 import { useSettings } from '@/store/useSettings'
 import { ipc } from '@/lib/ipc'
 import { prompt } from '@/store/usePrompt'
@@ -154,7 +155,10 @@ function NodeView({ node, depth }: { node: TreeNode; depth: number }) {
   const onClick = () => {
     setActivePath(node.path)
     if (isDir) setExpanded(node.path, !open)
-    else openTab(node.path)
+    else {
+      openTab(node.path)
+      usePanes.getState().focusOrOpen('editor')
+    }
   }
 
   return (
@@ -278,6 +282,7 @@ export function FileTree() {
           else {
             openTab(cur.node.path)
             setActivePath(cur.node.path)
+            usePanes.getState().focusOrOpen('editor')
           }
         }
         break

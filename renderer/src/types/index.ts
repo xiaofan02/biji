@@ -60,6 +60,15 @@ export interface TelnetHost {
   group?: string
 }
 
+export interface SerialHost {
+  id: string
+  name: string
+  path: string
+  baudRate: number
+  /** 会话管理器中的分组路径 */
+  group?: string
+}
+
 export type Theme = 'light' | 'paper' | 'dark'
 
 // .bnote 文档(JSON 为主):blocks 为 BlockNote 的 PartialBlock[]

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { ipc } from '@/lib/ipc'
 import { usePanes } from '@/store/usePanes'
 import { useQuickConnect } from '@/store/useQuickConnect'
+import { toast } from '@/store/useToast'
 import { Icon } from '@/components/common/Icon'
+import type { SSHHost, TelnetHost, SerialHost } from '@/types'
 
 // 快速连接弹窗(Alt+Q):选协议 + 填地址,立即新开一个终端会话。仿 SecureCRT 的「快速连接」。
-// 不落库(不写入主机列表);要保存的主机仍在「设置 → SSH/Telnet 主机」里配置、从会话管理器连接。
+// 默认是一次性连接；勾选“保存会话”后写入会话管理器，SSH/Telnet/串口均支持。
 const DEFAULT_PORT: Record<string, number> = { ssh: 22, telnet: 23 }
 const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400]
 
@@ -20,6 +22,7 @@ export function QuickConnect() {
   const [serialPorts, setSerialPorts] = useState<string[]>([])
   const [serialPath, setSerialPath] = useState('')
   const [baudRate, setBaudRate] = useState('9600')
+  const [saveSession, setSaveSession] = useState(false)
 
   // 关闭时重置表单
   useEffect(() => {
@@ -30,6 +33,7 @@ export function QuickConnect() {
       setPassword('')
       setKind('ssh')
       setSerialPath('')
+      setSaveSession(false)
     }
   }, [open])
 
@@ -57,7 +61,66 @@ export function QuickConnect() {
 
   if (!open) return null
 
-  const connect = () => {
+  const saveQuickSession = async (cfg: any, name: string): Promise<string | undefined> => {
+    if (!saveSession) return undefined
+    const makeId = () => (crypto.randomUUID ? crypto.randomUUID() : `quick-${Date.now()}`)
+
+    if (kind === 'ssh') {
+      const list = (((await ipc.settings.get('sshHosts')) as SSHHost[]) || []).slice()
+      const index = list.findIndex(
+        (item) => item.host.toLowerCase() === cfg.host.toLowerCase() && item.port === cfg.port && item.username === cfg.username
+      )
+      const previous = index >= 0 ? list[index] : undefined
+      const saved: SSHHost = {
+        id: previous?.id || makeId(),
+        name: previous?.name || name,
+        host: cfg.host,
+        port: cfg.port,
+        username: cfg.username,
+        auth: 'password',
+        password: cfg.password,
+        group: previous?.group || ''
+      }
+      if (index >= 0) list[index] = saved
+      else list.push(saved)
+      await ipc.settings.set('sshHosts', list)
+      return `ssh:${saved.id}`
+    }
+
+    if (kind === 'telnet') {
+      const list = (((await ipc.settings.get('telnetHosts')) as TelnetHost[]) || []).slice()
+      const index = list.findIndex((item) => item.host.toLowerCase() === cfg.host.toLowerCase() && item.port === cfg.port)
+      const previous = index >= 0 ? list[index] : undefined
+      const saved: TelnetHost = {
+        id: previous?.id || makeId(),
+        name: previous?.name || name,
+        host: cfg.host,
+        port: cfg.port,
+        group: previous?.group || ''
+      }
+      if (index >= 0) list[index] = saved
+      else list.push(saved)
+      await ipc.settings.set('telnetHosts', list)
+      return `telnet:${saved.id}`
+    }
+
+    const list = (((await ipc.settings.get('serialHosts')) as SerialHost[]) || []).slice()
+    const index = list.findIndex((item) => item.path.toLowerCase() === cfg.path.toLowerCase() && item.baudRate === cfg.baudRate)
+    const previous = index >= 0 ? list[index] : undefined
+    const saved: SerialHost = {
+      id: previous?.id || makeId(),
+      name: previous?.name || name,
+      path: cfg.path,
+      baudRate: cfg.baudRate,
+      group: previous?.group || ''
+    }
+    if (index >= 0) list[index] = saved
+    else list.push(saved)
+    await ipc.settings.set('serialHosts', list)
+    return `serial:${saved.id}`
+  }
+
+  const connect = async () => {
     let cfg: any
     let name: string
     if (kind === 'serial') {
@@ -73,7 +136,17 @@ export function QuickConnect() {
       cfg = kind === 'ssh' ? { host: h, port: pt, username: username.trim(), password } : { host: h, port: pt }
       name = `${h}:${pt}`
     }
-    window.dispatchEvent(new CustomEvent('biji:terminal-connect', { detail: { kind, cfg, name } }))
+    let originId: string | undefined
+    try {
+      originId = await saveQuickSession(cfg, name)
+      if (originId) {
+        window.dispatchEvent(new CustomEvent('biji:terminal-hosts-changed'))
+        toast('会话已保存到会话管理器', 'success')
+      }
+    } catch (error) {
+      toast(`保存会话失败：${(error as Error).message}`, 'error')
+    }
+    window.dispatchEvent(new CustomEvent('biji:terminal-connect', { detail: { kind, cfg, name, originId } }))
     usePanes.getState().focusOrOpen('terminal')
     setOpen(false)
   }
@@ -103,14 +176,16 @@ export function QuickConnect() {
             <>
               <div className="qc-row">
                 <label>串口</label>
-                <select value={serialPath} onChange={(e) => setSerialPath(e.target.value)}>
-                  {serialPorts.length === 0 && <option value="">未检测到串口设备</option>}
-                  {serialPorts.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
+                <input
+                  list="moqi-serial-ports"
+                  value={serialPath}
+                  onChange={(e) => setSerialPath(e.target.value)}
+                  placeholder="例如 COM20"
+                  spellCheck={false}
+                />
+                <datalist id="moqi-serial-ports">
+                  {serialPorts.map((p) => <option key={p} value={p} />)}
+                </datalist>
               </div>
               <div className="qc-row">
                 <label>波特率</label>
@@ -123,8 +198,7 @@ export function QuickConnect() {
                 </select>
               </div>
               <small className="qc-hint">
-                串口需要本机模块:先 <code>npm i serialport</code> 再 <code>npx @electron/rebuild -f -w serialport</code>，
-                重启后即可检测到设备并连接。
+                已内置串口支持。蓝牙串口未出现在候选列表时，可以直接输入端口名称，例如 COM20。
               </small>
             </>
           ) : (
@@ -174,12 +248,16 @@ export function QuickConnect() {
               )}
             </>
           )}
+          <label className="qc-save-option">
+            <input type="checkbox" checked={saveSession} onChange={(e) => setSaveSession(e.target.checked)} />
+            <span>保存会话</span>
+          </label>
         </div>
         <div className="qc-foot">
           <button className="btn" onClick={() => setOpen(false)}>
             取消
           </button>
-          <button className="btn primary" onClick={connect} disabled={!canConnect}>
+          <button className="btn primary" onClick={() => void connect()} disabled={!canConnect}>
             连接
           </button>
         </div>
