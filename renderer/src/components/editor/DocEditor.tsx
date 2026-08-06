@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
+import { withCollaboration } from '@blocknote/core/yjs'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
 import './editor.css'
@@ -19,6 +20,7 @@ import { useTabs } from '@/store/useTabs'
 import { useUI, type HeadingNumberStyle } from '@/store/useUI'
 import { toast } from '@/store/useToast'
 import { debounce } from '@/lib/util'
+import { useCollaboration, type CollaborationSession } from '@/lib/collab'
 
 interface Heading {
   id: string
@@ -160,7 +162,15 @@ export type DocSource = { type: 'bnote'; doc: BijiDoc } | { type: 'markdown'; te
 
 // 单篇文档的 BlockNote 编辑器(飞书块编辑)。由 DocArea 按 path 作为 key 挂载,切换文档即重建。
 // 本地文件模式:正文来自本地 .bnote(seed),改动防抖落盘(ipc.fs.write,内含原子写 + .biji-history)。
-export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
+export function DocEditor({
+  path,
+  seed,
+  collaboration
+}: {
+  path: string
+  seed: BijiDoc
+  collaboration?: CollaborationSession | null
+}) {
   const theme = useSettings((s) => s.theme)
   const setModified = useTabs((s) => s.setModified)
   const user = useAuth((s) => s.user)
@@ -172,6 +182,7 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   const docAreaRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
   const normalizingListsRef = useRef(false)
+  const presence = useCollaboration((s) => s.documents[path])
 
   // 标题:存进 BijiDoc.title(受控输入)。
   const [title, setTitle] = useState(seed.title || '')
@@ -182,14 +193,11 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   // 加载时是否本就有正文:空内容护栏据此判断"自动保存写空"是否可疑
   const seedNonEmpty = useMemo(() => !isBlocksEmpty((seed.blocks as any[]) || []), [seed])
 
-  const editor = useCreateBlockNote(
-    {
+  const editorOptions = useMemo(() => {
+    const common = {
       schema: bijiSchema, // 飞书式 schema:代码块带 Shiki 语法高亮
       dictionary: zh, // 斜杠菜单/占位符/工具栏中文化
       domAttributes: { editor: { spellcheck: 'false', class: 'biji-bn-editor' } },
-      // 本地模式:用文件里的 blocks 作为初始内容(空文档传 undefined,BlockNote 自带一个空段落)。
-      initialContent:
-        seed.blocks && (seed.blocks as any[]).length ? (blocksForDisplay(seed.blocks as any[], path) as any) : undefined,
       uploadFile: async (file: File) => {
         // 单文件笔记模式：附件转为 data URL 直接写进 .bnote，不再创建可见的 assets 文件夹。
         return await new Promise<string>((resolve, reject) => {
@@ -199,9 +207,27 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
           reader.readAsDataURL(file)
         })
       }
-    },
-    []
-  )
+    }
+    if (collaboration) {
+      return withCollaboration({
+        ...common,
+        collaboration: {
+          fragment: collaboration.document.getXmlFragment('document-store'),
+          provider: collaboration.provider as any,
+          user: { name: user?.name || '协作者', color: user?.color || '#5b7cff' },
+          showCursorLabels: 'activity'
+        }
+      } as any)
+    }
+    return {
+      ...common,
+      initialContent:
+        seed.blocks && (seed.blocks as any[]).length ? (blocksForDisplay(seed.blocks as any[], path) as any) : undefined
+    }
+  }, [collaboration?.roomId, path, seed, user?.color, user?.name])
+
+  // 本地与协作模式的 schema 相同，但 BlockNote 的条件泛型会推导成联合类型；运行时实例接口一致。
+  const editor = useCreateBlockNote(editorOptions as any, [collaboration?.roomId, path]) as any
 
   // 落盘:把当前正文 + 标题写回本地 .bnote。force=显式保存(Ctrl+S/失焦/卸载),绕过空内容护栏。
   const saveNow = useCallback(
@@ -343,10 +369,35 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
   const onTitleChange = (v: string) => {
     setTitle(v)
     titleRef.current = v
+    if (collaboration) {
+      const sharedTitle = collaboration.document.getText('title')
+      collaboration.document.transact(() => {
+        sharedTitle.delete(0, sharedTitle.length)
+        if (v) sharedTitle.insert(0, v)
+      }, 'moqi-title')
+    }
     dirtyRef.current = true
     setModified(path, true)
     autosave()
   }
+
+  // 标题和正文共用同一个 Y.Doc。远端标题变化会立即更新输入框，并写回本地镜像。
+  useEffect(() => {
+    if (!collaboration) return
+    const sharedTitle = collaboration.document.getText('title')
+    const syncTitle = () => {
+      const next = sharedTitle.toString()
+      if (next === titleRef.current) return
+      titleRef.current = next
+      setTitle(next)
+      dirtyRef.current = true
+      setModified(path, true)
+      autosave()
+    }
+    sharedTitle.observe(syncTitle)
+    syncTitle()
+    return () => sharedTitle.unobserve(syncTitle)
+  }, [autosave, collaboration, path, setModified])
 
   useEffect(() => {
     publishContext()
@@ -582,6 +633,35 @@ export function DocEditor({ path, seed }: { path: string; seed: BijiDoc }) {
             <span className="doc-meta-author">📝 {user?.name || '我'}</span>
             <span className="doc-meta-sep">·</span>
             <span>{formatMeta(updatedAt) || '本地文档'}</span>
+            {collaboration && (
+              <span
+                className={`collab-presence ${presence?.status || 'connecting'}`}
+                title={presence?.error || '此文档支持多人实时编辑'}
+              >
+                <span className="collab-live-dot" />
+                {presence?.status === 'live'
+                  ? `实时协作${presence.users.length > 1 ? ` · ${presence.users.length} 人在线` : ''}`
+                  : presence?.status === 'error'
+                    ? '协作连接失败'
+                    : presence?.status === 'offline'
+                      ? '协作离线'
+                      : '正在连接协作'}
+              </span>
+            )}
+            {presence?.users && presence.users.length > 1 && (
+              <span className="collab-avatars" aria-label="当前协作者">
+                {presence.users.slice(0, 4).map((onlineUser) => (
+                  <span
+                    key={`${onlineUser.clientId}:${onlineUser.name}`}
+                    className="collab-avatar"
+                    style={{ '--collab-color': onlineUser.color } as React.CSSProperties}
+                    title={onlineUser.name}
+                  >
+                    {onlineUser.name.slice(0, 1).toUpperCase()}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           <BlockNoteView editor={editor} theme={theme === 'dark' ? 'dark' : 'light'} onChange={onContentChange} />
           <CodeGutters scrollRef={docAreaRef} />

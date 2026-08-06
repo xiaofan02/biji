@@ -321,6 +321,18 @@ async function putWithEnsure(vpath: string, doc: BijiDoc): Promise<void> {
   await withTimeout(api.putDoc(vpath, prepared.cloudDoc), 8000)
 }
 
+// 实时协作启动前确保云端节点及 REST 镜像存在，并返回稳定的虚拟路径。
+// 失败交给调用方降级为纯本地编辑，不阻塞打开笔记。
+export async function prepareCloudDocument(localPath: string, doc: BijiDoc): Promise<string | null> {
+  if (!active()) return null
+  const vpath = localToVirtual(localPath)
+  if (!vpath) return null
+  await putWithEnsure(vpath, doc)
+  knownNodes.add(vpath)
+  noteResult(true)
+  return vpath
+}
+
 // ---- 拉取(打开文档时)----
 // 登录且服务器较新则写回本地(saveDoc 触发 .biji-history 备份)并作种子;否则/失败一律返回本地 doc(fail-open)。
 export async function pullDoc(localPath: string, localDoc: BijiDoc): Promise<BijiDoc> {

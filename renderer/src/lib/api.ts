@@ -69,6 +69,11 @@ export const api = {
     jget('/api/doc?path=' + encodeURIComponent(path)).then((d) => ({ id: d.id as string, doc: (d.doc ?? null) as BijiDoc | null })),
   putDoc: (path: string, doc: BijiDoc): Promise<void> =>
     jsend('PUT', '/api/doc', { path, doc }).then(() => undefined),
+  prepareCollaboration: (path: string, initialUpdate: string): Promise<{ id: string; update: string }> =>
+    jsend('POST', '/api/doc/collaboration', { path, initialUpdate }).then((d) => ({
+      id: d.id as string,
+      update: d.update as string
+    })),
   uploadImage: async (file: Blob, filename: string, nodeId?: string): Promise<UploadedAsset> => {
     const fd = new FormData()
     fd.append('file', file, filename)

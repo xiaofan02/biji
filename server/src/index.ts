@@ -16,7 +16,8 @@ async function main(): Promise<void> {
 
   const app = express()
   app.use(cors()) // 客户端是 Electron(file:// 或 dev localhost),跨源用 Bearer 令牌,无 cookie,放开 CORS
-  app.use(express.json({ limit: '2mb' }))
+  // 首次协作初始化可能包含内嵌图片；正常实时编辑仍走体积很小的 WebSocket 增量。
+  app.use(express.json({ limit: '25mb' }))
 
   // 健康检查:连库 + 返回 200。Caddy/监控/部署脚本用它判断就绪。
   app.get(

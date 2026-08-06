@@ -7,6 +7,8 @@ import { newDocFlow } from '@/lib/fileOps'
 import { DocEditor } from '@/components/editor/DocEditor'
 import { CodeEditor } from '@/components/editor/CodeEditor'
 import { Icon } from '@/components/common/Icon'
+import { createCollaborationSession, useCollaboration, type CollaborationSession } from '@/lib/collab'
+import { useAuth } from '@/store/useAuth'
 
 // 本地优先:文档树/正文永远来自本机磁盘(ipc.fs)。登录只用于身份 + 云端同步(叠加层,见 lib/sync.ts),
 // 不再切换数据源、不再有"云端模式"的独立编辑器。
@@ -34,23 +36,46 @@ function EmptyState() {
 // 登录且服务器可达时,打开前先尽力拉取云端较新版本(pullDoc,失败/未登录则原样用本地)。
 function BnoteHost({ path }: { path: string }) {
   const [seed, setSeed] = useState<BijiDoc | null>(null)
+  const [collaboration, setCollaboration] = useState<CollaborationSession | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const authStatus = useAuth((s) => s.status)
+  const user = useAuth((s) => s.user)
 
   useEffect(() => {
     let alive = true
     setSeed(null)
     setError(null)
+    let session: CollaborationSession | null = null
     loadDoc(path)
       .then((doc) => pullDoc(path, doc)) // 尽力而为:合并云端较新版本;pullDoc 内部失败即返回本地 doc
-      .then((doc) => alive && setSeed(doc))
+      .then(async (doc) => {
+        if (authStatus === 'in' && user) {
+          try {
+            session = await createCollaborationSession(path, doc, user)
+          } catch (collabError) {
+            console.warn('[collab] 实时协作启动失败，已降级为本地编辑', collabError)
+            useCollaboration.getState().setDocument(path, {
+              status: 'error',
+              error: (collabError as Error).message || '实时协作连接失败'
+            })
+          }
+        }
+        if (alive) {
+          setCollaboration(session)
+          setSeed(doc)
+        } else {
+          session?.destroy()
+        }
+      })
       .catch((e) =>
         alive &&
         setError(e instanceof DocCorruptError ? '文档内容无法解析,已阻止打开以防覆盖' : (e as Error).message || '打开失败')
       )
     return () => {
       alive = false
+      session?.destroy()
     }
-  }, [path])
+  }, [path, authStatus, user?.id])
 
   if (error)
     return (
@@ -63,7 +88,7 @@ function BnoteHost({ path }: { path: string }) {
       </div>
     )
   if (!seed) return <div className="doc-area"><div className="placeholder-pane">加载文档中…</div></div>
-  return <DocEditor key={path} path={path} seed={seed} />
+  return <DocEditor key={`${path}:${collaboration?.roomId || 'local'}`} path={path} seed={seed} collaboration={collaboration} />
 }
 
 export function DocArea() {

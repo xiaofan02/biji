@@ -1,6 +1,6 @@
 {
   "name": "moqi",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
   "main": "app-build/main/index.js",
   "author": "biji",
@@ -53,6 +53,9 @@
     "typescript": "^5.6.3",
     "vite": "^6.0.0",
     "y-indexeddb": "^9.0.12",
+    "y-prosemirror": "^1.3.7",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.32",
     "zustand": "^5.0.2"
   },
   "build": {

@@ -46,6 +46,68 @@
   line-height: 1.4;
   padding-top: 9px;
 }
+
+/* 实时协作状态与多人头像：状态清晰，但不打断正文阅读。 */
+.collab-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  background: var(--bg-canvas);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+.collab-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+.collab-presence.live {
+  color: #21875a;
+  border-color: color-mix(in srgb, #35b779 24%, var(--border));
+  background: color-mix(in srgb, #35b779 7%, var(--bg-elevated));
+}
+.collab-presence.live .collab-live-dot {
+  background: #35b779;
+  box-shadow: 0 0 0 3px rgba(53, 183, 121, 0.12);
+}
+.collab-presence.connecting .collab-live-dot { background: var(--accent); animation: collab-meta-pulse 1.4s infinite; }
+.collab-presence.error { color: #d84d5b; }
+.collab-presence.error .collab-live-dot { background: #ef5b68; }
+@keyframes collab-meta-pulse { 50% { opacity: 0.35; } }
+.collab-avatars {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 1px;
+}
+.collab-avatar {
+  width: 23px;
+  height: 23px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -5px;
+  border: 2px solid var(--bg-elevated);
+  border-radius: 50%;
+  background: var(--collab-color, var(--accent));
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: 0 2px 7px rgba(20, 27, 44, 0.18);
+}
+.collab-avatar:first-child { margin-left: 0; }
+
+/* BlockNote 远端光标的标签增加可读性，鼠标悬停或远端输入时出现。 */
+.doc-scroll .bn-collaboration-cursor__caret { border-radius: 2px; }
+.doc-scroll .bn-collaboration-cursor__label {
+  color: #fff !important;
+  border-radius: 5px 5px 5px 0 !important;
+  box-shadow: 0 3px 10px rgba(18, 24, 40, 0.2);
+}
 .doc-scroll [data-content-type='heading']:not([data-level]),
 .doc-scroll [data-content-type='heading'][data-level='1'],
 .doc-scroll

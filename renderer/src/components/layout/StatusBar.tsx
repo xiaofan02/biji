@@ -5,6 +5,7 @@ import { useAuth } from '@/store/useAuth'
 import { useSync, pushAll, pullAll, pushDoc, type NoteSyncStatus, type SyncStatus } from '@/lib/sync'
 import { loadDoc } from '@/lib/note'
 import { toast } from '@/store/useToast'
+import { useCollaboration } from '@/lib/collab'
 
 // 云端同步状态文案 + 小圆点颜色(本地优先:未登录不显示,登录才出现)
 const SYNC_LABEL: Record<SyncStatus, string> = {
@@ -41,6 +42,7 @@ export function StatusBar() {
   const loggedIn = useAuth((s) => s.status === 'in')
   const syncStatus = useSync((s) => s.status)
   const noteSync = useSync((s) => (active?.kind === 'bnote' ? s.notes[active.path] : undefined))
+  const collaboration = useCollaboration((s) => (active?.kind === 'bnote' ? s.documents[active.path] : undefined))
 
   const onRetryNote = async () => {
     if (!active || active.kind !== 'bnote' || noteSync?.status !== 'error') return
@@ -95,6 +97,18 @@ export function StatusBar() {
           <span className="status-saved">已保存</span>
         ))}
       <span className="spacer" />
+      {collaboration && (
+        <span className={`status-collab ${collaboration.status}`} title={collaboration.error || '多人实时编辑状态'}>
+          <span className="status-collab-dot" />
+          {collaboration.status === 'live'
+            ? `实时协作 · ${Math.max(1, collaboration.users.length)} 人`
+            : collaboration.status === 'connecting'
+              ? '协作连接中'
+              : collaboration.status === 'offline'
+                ? '协作离线'
+                : '协作异常'}
+        </span>
+      )}
       {loggedIn && (
         <>
           <span

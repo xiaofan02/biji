@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import * as Y from 'yjs'
 import { pool } from './db'
 import { asyncHandler, HttpError } from './http'
 import { authMiddleware } from './auth'
@@ -243,5 +244,53 @@ treeRouter.put(
     )
     if (!rowCount) throw new HttpError(404, '文档不存在')
     res.json({ ok: true })
+  })
+)
+
+// 首次进入实时协作时，把现有 BlockNote 正文转换出的 Yjs 状态原子写入房间。
+// SELECT ... FOR UPDATE 保证两位用户同时首次打开时只有一份种子，避免正文重复。
+treeRouter.post(
+  '/doc/collaboration',
+  asyncHandler(async (req, res) => {
+    const { path, initialUpdate } = (req.body ?? {}) as { path?: string; initialUpdate?: string }
+    if (!path) throw new HttpError(400, '缺少 path')
+    if (!initialUpdate || typeof initialUpdate !== 'string') throw new HttpError(400, '缺少协作初始化内容')
+
+    let seed: Buffer
+    try {
+      seed = Buffer.from(initialUpdate, 'base64')
+      const check = new Y.Doc()
+      Y.applyUpdate(check, new Uint8Array(seed))
+      check.destroy()
+    } catch {
+      throw new HttpError(400, '协作初始化内容无效')
+    }
+
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows } = await client.query<{ id: string; ydoc: Buffer | null }>(
+        "SELECT id, ydoc FROM nodes WHERE path=$1 AND type='file' FOR UPDATE",
+        [path]
+      )
+      const row = rows[0]
+      if (!row) throw new HttpError(404, '文档不存在')
+      let stored = row.ydoc
+      if (!stored) {
+        await client.query('UPDATE nodes SET ydoc=$1, updated_at=now(), updated_by=$2 WHERE id=$3', [
+          seed,
+          req.user?.id ?? null,
+          row.id
+        ])
+        stored = seed
+      }
+      await client.query('COMMIT')
+      res.json({ id: row.id, update: stored.toString('base64') })
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
   })
 )

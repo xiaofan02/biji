@@ -123,8 +123,9 @@ export function TopBar() {
         <Icon name="panel-left" />
       </button>
       <div className="brand">
-        <span className="logo">📓</span>
-        <span>墨启 MOQI</span>
+        <span className="logo"><Icon name="sparkles" size={15} strokeWidth={2.2} /></span>
+        <span className="brand-name">墨启 <b>MOQI</b></span>
+        {updateStatus.currentVersion && <span className="brand-version">v{updateStatus.currentVersion}</span>}
       </div>
 
       <div className="search-box">

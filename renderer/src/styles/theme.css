@@ -1,55 +1,59 @@
 /* 飞书风格设计令牌 —— 浅色/深色双主题,通过 <html data-theme> 切换 */
 :root,
 [data-theme='light'] {
-  --accent: #3370ff;
-  --accent-hover: #245bdb;
-  --accent-soft: rgba(51, 112, 255, 0.1);
-  --selection: rgba(51, 112, 255, 0.2);
+  --accent: #5b6df5;
+  --accent-hover: #4959dc;
+  --accent-soft: rgba(91, 109, 245, 0.11);
+  --selection: rgba(91, 109, 245, 0.2);
 
-  --bg: #ffffff;
-  --bg-sidebar: #f7f8fa;
+  --bg: #f7f8fb;
+  --bg-canvas: #fbfbfd;
+  --bg-sidebar: #f1f3f8;
   --bg-elevated: #ffffff;
-  --bg-hover: rgba(31, 35, 41, 0.06);
-  --bg-active: rgba(51, 112, 255, 0.1);
-  --bg-selected: rgba(31, 35, 41, 0.09);
-  --bg-input: #f2f3f5;
+  --bg-hover: rgba(28, 35, 54, 0.055);
+  --bg-active: rgba(91, 109, 245, 0.11);
+  --bg-selected: rgba(91, 109, 245, 0.09);
+  --bg-input: #eef0f5;
 
-  --text: #1f2329;
-  --text-secondary: #646a73;
-  --text-tertiary: #8f959e;
+  --text: #1c2333;
+  --text-secondary: #626b7c;
+  --text-tertiary: #9299a8;
   --text-on-accent: #ffffff;
 
-  --border: #dee0e3;
-  --border-light: #eff0f1;
+  --border: #dce0e9;
+  --border-light: #e9ebf1;
+  --border-strong: #cbd0dc;
 
-  --shadow: 0 4px 16px rgba(31, 35, 41, 0.1);
-  --shadow-sm: 0 2px 8px rgba(31, 35, 41, 0.08);
+  --shadow: 0 18px 48px rgba(27, 35, 55, 0.12), 0 2px 8px rgba(27, 35, 55, 0.06);
+  --shadow-sm: 0 5px 18px rgba(27, 35, 55, 0.08);
 
   --doc-max-width: 840px;
 }
 
 [data-theme='dark'] {
-  --accent: #4a7dff;
-  --accent-hover: #6b96ff;
-  --accent-soft: rgba(74, 125, 255, 0.16);
-  --selection: rgba(74, 125, 255, 0.32);
+  --accent: #7c8cff;
+  --accent-hover: #93a0ff;
+  --accent-soft: rgba(124, 140, 255, 0.15);
+  --selection: rgba(124, 140, 255, 0.3);
 
-  --bg: #1a1a1a;
-  --bg-sidebar: #1f1f1f;
-  --bg-elevated: #252525;
+  --bg: #0f1218;
+  --bg-canvas: #12151c;
+  --bg-sidebar: #151922;
+  --bg-elevated: #1a1f2a;
   --bg-hover: rgba(255, 255, 255, 0.08);
-  --bg-active: rgba(74, 125, 255, 0.18);
+  --bg-active: rgba(124, 140, 255, 0.18);
   --bg-selected: rgba(255, 255, 255, 0.11);
-  --bg-input: #2b2b2b;
+  --bg-input: #202631;
 
-  --text: #e6e6e6;
-  --text-secondary: #a6a6a6;
-  --text-tertiary: #7a7a7a;
+  --text: #edf0f7;
+  --text-secondary: #aeb6c6;
+  --text-tertiary: #747e91;
   --text-on-accent: #ffffff;
 
-  --border: #3a3a3a;
-  --border-light: #2e2e2e;
+  --border: #303746;
+  --border-light: #242a35;
+  --border-strong: #3a4354;
 
-  --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow: 0 20px 52px rgba(0, 0, 0, 0.48), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
