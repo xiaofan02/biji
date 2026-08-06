@@ -8,6 +8,7 @@ import { toast } from '@/store/useToast'
 import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
 import { usePanes } from '@/store/usePanes'
+import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
 import type { SSHHost, TelnetHost } from '@/types'
 import './terminal.css'
 
@@ -450,8 +451,8 @@ function FolderNode({
           key={`h:${h.id}`}
           className={`sm-row sm-host${connected.has(h.id) ? ' connected' : ''}`}
           style={{ paddingLeft: 8 + depth * 14 + 17 }}
-          title={`${h.name} · ${hostAddr(h)} · ${h.kind.toUpperCase()}\n点击连接(可重复点击开多个)`}
-          onClick={() => onConnect(h)}
+          title={`${h.name} · ${hostAddr(h)} · ${h.kind.toUpperCase()}\n双击连接(可重复打开多个会话)`}
+          onDoubleClick={() => onConnect(h)}
         >
           <span className="sm-icon">
             <Icon name="terminal" size={13} />
@@ -468,12 +469,16 @@ function SessionManager({
   leaves,
   connected,
   onConnect,
-  onRefresh
+  onRefresh,
+  onImport,
+  onExport
 }: {
   leaves: HostLeaf[]
   connected: Set<string>
   onConnect: (h: HostLeaf) => void
   onRefresh: () => void
+  onImport: () => void
+  onExport: () => void
 }) {
   const [filter, setFilter] = useState('')
   const [spin, setSpin] = useState(false)
@@ -504,6 +509,12 @@ function SessionManager({
     <div className="term-manager">
       <div className="sm-head">
         <span className="sm-title">会话管理器</span>
+        <button className="icon-btn small" title="导入 SecureCRT / MobaXterm / 墨启会话" onClick={onImport}>
+          <Icon name="file-plus" size={14} />
+        </button>
+        <button className="icon-btn small" title="导出墨启会话（不包含密码）" onClick={onExport}>
+          <Icon name="download" size={14} />
+        </button>
         <button className={`icon-btn small${spin ? ' spinning' : ''}`} title="刷新主机列表" onClick={doRefresh}>
           <Icon name="refresh" size={14} />
         </button>
@@ -530,7 +541,7 @@ function SessionManager({
                 className={`sm-row sm-host${connected.has(h.id) ? ' connected' : ''}`}
                 style={{ paddingLeft: 12 }}
                 title={`${h.name} · ${hostAddr(h)} · ${h.kind.toUpperCase()}`}
-                onClick={() => onConnect(h)}
+                onDoubleClick={() => onConnect(h)}
               >
                 <span className="sm-icon">
                   <Icon name="terminal" size={13} />
@@ -583,6 +594,48 @@ export function TerminalPanel() {
     })
   }
   useEffect(loadHosts, [])
+
+  const importSessions = async () => {
+    const paths = await ipc.sys.chooseSessionFiles()
+    if (!paths.length) return
+    try {
+      const imported = await Promise.all(paths.map(async (sourcePath) => importSessionText(sourcePath, String(await ipc.sys.readFile(sourcePath)))))
+      const [currentSSH, currentTelnet] = await Promise.all([
+        ipc.settings.get('sshHosts') as Promise<any[]>,
+        ipc.settings.get('telnetHosts') as Promise<TelnetHost[]>
+      ])
+      const ssh = ((currentSSH || []) as any[]).map(normalizeSSHHost)
+      const telnet = currentTelnet || []
+      const sshKeys = new Set(ssh.map((host) => `${host.host}:${host.port}:${host.username}`.toLowerCase()))
+      const telnetKeys = new Set(telnet.map((host) => `${host.host}:${host.port}`.toLowerCase()))
+      let added = 0
+      for (const batch of imported) {
+        for (const host of batch.ssh) {
+          const key = `${host.host}:${host.port}:${host.username}`.toLowerCase()
+          if (!sshKeys.has(key)) { sshKeys.add(key); ssh.push(host); added++ }
+        }
+        for (const host of batch.telnet) {
+          const key = `${host.host}:${host.port}`.toLowerCase()
+          if (!telnetKeys.has(key)) { telnetKeys.add(key); telnet.push(host); added++ }
+        }
+      }
+      await Promise.all([ipc.settings.set('sshHosts', ssh), ipc.settings.set('telnetHosts', telnet)])
+      loadHosts()
+      toast(added ? `已导入 ${added} 个会话；密码需在设置中补充` : '没有发现新的可导入会话', added ? 'success' : 'error')
+    } catch (error) {
+      toast(`会话导入失败：${(error as Error).message}`, 'error')
+    }
+  }
+
+  const exportSessions = async () => {
+    const [rawSSH, telnet] = await Promise.all([
+      ipc.settings.get('sshHosts') as Promise<any[]>,
+      ipc.settings.get('telnetHosts') as Promise<TelnetHost[]>
+    ])
+    const text = exportMoqiSessions((rawSSH || []).map(normalizeSSHHost), telnet || [])
+    const saved = await ipc.exporter.saveText('墨启会话.json', text, [{ name: '墨启会话', extensions: ['json'] }])
+    if (saved) toast('会话已安全导出（未包含密码和私钥口令）', 'success')
+  }
 
   // 「连接」= 为该主机新开一个会话标签(同一台设备也可开多个),不影响已有会话
   const connectHost = (leaf: HostLeaf) => {
@@ -654,7 +707,14 @@ export function TerminalPanel() {
     <div className="term-panel" ref={panelRef}>
       <div className="term-body">
         {managerOpen && (
-          <SessionManager leaves={leaves} connected={connected} onConnect={connectHost} onRefresh={loadHosts} />
+          <SessionManager
+            leaves={leaves}
+            connected={connected}
+            onConnect={connectHost}
+            onRefresh={loadHosts}
+            onImport={() => void importSessions()}
+            onExport={() => void exportSessions()}
+          />
         )}
         <div className="term-main">
           <div className="term-tabs">
@@ -691,7 +751,7 @@ export function TerminalPanel() {
           <div className="term-sessions">
             {tabs.length === 0 ? (
               <div className="term-empty">
-                从左侧「会话管理器」点击主机即可连接。可同时连接多台设备,每台一个标签页;Ctrl+Tab 切换。
+                从左侧「会话管理器」双击主机即可连接。可同时连接多台设备，每台一个标签页；Ctrl+Tab 切换。
               </div>
             ) : (
               tabs.map((t) => <TermSession key={t.key} tab={t} active={t.key === activeKey} theme={theme} />)

@@ -244,3 +244,57 @@
   color: #e54545;
   background: var(--bg-elevated);
 }
+
+/* Ctrl+Space 轻量悬浮助手：不改变当前分屏，也不会遮成一个整页。 */
+.quick-ai-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(12, 18, 28, 0.16);
+  backdrop-filter: blur(2px);
+}
+.quick-ai-window {
+  position: absolute;
+  top: 78px;
+  right: 34px;
+  width: min(440px, calc(100vw - 36px));
+  height: min(620px, calc(100vh - 116px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow: 0 28px 80px rgba(17, 24, 39, 0.24), var(--shadow-sm);
+}
+.quick-ai-head {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+.quick-ai-mark {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(145deg, #7485ff, #4d5ee6);
+}
+.quick-ai-head > div { flex: 1; display: flex; flex-direction: column; line-height: 1.25; }
+.quick-ai-head strong { font-size: 13px; }
+.quick-ai-head div span { font-size: 10px; color: var(--text-tertiary); }
+.quick-ai-head kbd {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  background: var(--bg-canvas);
+  font: 10px/1.2 inherit;
+}
+.quick-ai-body { flex: 1; min-height: 0; }

@@ -24,6 +24,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { QuickConnect } from '@/components/terminal/QuickConnect'
 import { useQuickConnect } from '@/store/useQuickConnect'
 import { LoginScreen } from '@/components/auth/LoginScreen'
+import { QuickAI } from '@/components/ai/QuickAI'
 
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
@@ -98,6 +99,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // 应用聚焦时 Ctrl+Space 召出轻量 AI 悬浮窗；再次按下或 Esc 关闭。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Space') {
+        e.preventDefault()
+        const ui = useUI.getState()
+        ui.setQuickAiOpen(!ui.quickAiOpen)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // 抑制 "ResizeObserver loop completed with undelivered notifications" 良性警告
   // (Chromium 已知行为:RO 回调内又改了布局,下一帧自动处理;不影响功能、打包后也不出现)。
   // 阻止它冒泡成未捕获错误,避免刷红/打断体验。
@@ -132,6 +146,7 @@ export default function App() {
       <SettingsModal />
       <QuickConnect />
       <LoginScreen />
+      <QuickAI />
       <PromptDialog />
       <ConfirmDialog />
       <MoveDialog />

@@ -125,6 +125,14 @@ function createWindow(): void {
     icon: join(app.getAppPath(), 'build', 'icon.png'),
     backgroundColor: '#ffffff',
     title: '墨启 MOQI',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#f7f8fb',
+      symbolColor: '#596274',
+      height: 54
+    },
+    autoHideMenuBar: true,
+    backgroundMaterial: 'mica',
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -309,6 +317,16 @@ ipcMain.handle('update:install', () => {
 ipcMain.handle('settings:get', (_e, key: string) => store.get(key))
 ipcMain.handle('settings:set', (_e, key: string, value: unknown) => {
   store.set(key, value)
+  return true
+})
+ipcMain.handle('window:set-theme', (_e, theme: 'light' | 'paper' | 'dark') => {
+  const palette =
+    theme === 'dark'
+      ? { color: '#0f1218', symbolColor: '#d7dceb' }
+      : theme === 'paper'
+        ? { color: '#f4efe4', symbolColor: '#514c43' }
+        : { color: '#f7f8fb', symbolColor: '#596274' }
+  mainWindow?.setTitleBarOverlay({ ...palette, height: 54 })
   return true
 })
 ipcMain.handle('settings:all', () => store.store)
@@ -649,6 +667,17 @@ ipcMain.handle('sys:choose-file', async () => {
   if (!mainWindow) return null
   const r = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'] })
   return r.canceled ? null : r.filePaths[0]
+})
+ipcMain.handle('sys:choose-session-files', async () => {
+  if (!mainWindow) return []
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '会话文件', extensions: ['json', 'ini', 'mxtsessions', 'txt'] },
+      { name: '全部文件', extensions: ['*'] }
+    ]
+  })
+  return r.canceled ? [] : r.filePaths
 })
 ipcMain.handle('sys:choose-image', async () => {
   if (!mainWindow) return null

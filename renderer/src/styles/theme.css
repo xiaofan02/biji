@@ -57,3 +57,32 @@
   --shadow: 0 20px 52px rgba(0, 0, 0, 0.48), 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
+
+/* 书页主题：低对比暖白纸张 + 墨色文字，适合长时间阅读和整理资料。 */
+[data-theme='paper'] {
+  --accent: #476f68;
+  --accent-hover: #385c56;
+  --accent-soft: rgba(71, 111, 104, 0.12);
+  --selection: rgba(190, 160, 95, 0.24);
+
+  --bg: #f4efe4;
+  --bg-canvas: #f7f1e5;
+  --bg-sidebar: #ece5d8;
+  --bg-elevated: #fffaf0;
+  --bg-hover: rgba(81, 69, 49, 0.07);
+  --bg-active: rgba(71, 111, 104, 0.13);
+  --bg-selected: rgba(71, 111, 104, 0.1);
+  --bg-input: #ebe3d5;
+
+  --text: #302d28;
+  --text-secondary: #6b645a;
+  --text-tertiary: #948a7c;
+  --text-on-accent: #ffffff;
+
+  --border: #d9cfbf;
+  --border-light: #e6ddcf;
+  --border-strong: #c7baa7;
+
+  --shadow: 0 18px 48px rgba(75, 61, 40, 0.13), 0 2px 8px rgba(75, 61, 40, 0.06);
+  --shadow-sm: 0 5px 18px rgba(75, 61, 40, 0.09);
+}

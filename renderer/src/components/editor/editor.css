@@ -708,6 +708,69 @@
 }
 
 /* ===== 斜杠 / 块菜单:紧凑的飞书式菜单 ===== */
+.slash-search-menu {
+  width: 232px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+.slash-search-box {
+  height: 36px;
+  margin: 6px 6px 2px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.slash-search-box .placeholder { color: var(--text-tertiary); }
+.custom-suggestion-list {
+  max-height: min(330px, 45vh);
+  padding: 3px 5px 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.custom-suggestion-group {
+  padding: 7px 8px 3px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+}
+.custom-suggestion-item {
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+}
+.custom-suggestion-item[aria-selected='true'],
+.custom-suggestion-item:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.custom-suggestion-icon { width: 20px; display: inline-flex; justify-content: center; color: var(--text-secondary); }
+.custom-suggestion-item[aria-selected='true'] .custom-suggestion-icon { color: var(--accent); }
+.custom-suggestion-empty { padding: 18px 8px; color: var(--text-tertiary); font-size: 12px; text-align: center; }
+.slash-search-menu .bn-suggestion-menu {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
 .bn-mantine .bn-suggestion-menu {
   max-height: min(360px, 48vh);
   overflow-y: auto;
@@ -718,6 +781,14 @@
   box-shadow: var(--shadow);
   scrollbar-width: thin;
   overscroll-behavior: contain;
+}
+
+.visually-hidden-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 /* 隐藏描述副标题与右侧快捷键徽标 —— 飞书没有 */
 .bn-mt-suggestion-menu-item-subtitle {

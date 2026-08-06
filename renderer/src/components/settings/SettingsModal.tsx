@@ -90,8 +90,9 @@ function GeneralPane() {
       </div>
       <div className="form-group">
         <label>主题</label>
-        <select value={theme} onChange={(e) => setTheme(e.target.value as 'light' | 'dark')}>
+        <select value={theme} onChange={(e) => setTheme(e.target.value as 'light' | 'paper' | 'dark')}>
           <option value="light">浅色</option>
+          <option value="paper">书页护眼</option>
           <option value="dark">深色</option>
         </select>
       </div>

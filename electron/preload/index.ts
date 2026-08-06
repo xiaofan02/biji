@@ -100,12 +100,14 @@ const api = {
     }
   },
   sys: {
+    setWindowTheme: (theme: 'light' | 'paper' | 'dark') => ipcRenderer.invoke('window:set-theme', theme),
     openExternal: (url: string) => ipcRenderer.invoke('sys:open-external', url),
     openPath: (p: string) => ipcRenderer.invoke('sys:open-path', p) as Promise<boolean>,
     openDataFile: (name: string, dataUrl: string) =>
       ipcRenderer.invoke('sys:open-data-file', name, dataUrl) as Promise<boolean>,
     showInFolder: (p: string) => ipcRenderer.invoke('sys:show-in-folder', p),
     chooseFile: () => ipcRenderer.invoke('sys:choose-file'),
+    chooseSessionFiles: () => ipcRenderer.invoke('sys:choose-session-files') as Promise<string[]>,
     chooseFolder: () => ipcRenderer.invoke('sys:choose-folder'),
     chooseImage: () => ipcRenderer.invoke('sys:choose-image'),
     readFile: (p: string) => ipcRenderer.invoke('sys:read-file', p)

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useCreateBlockNote } from '@blocknote/react'
+import {
+  getDefaultReactSlashMenuItems,
+  SuggestionMenuController,
+  useCreateBlockNote,
+  type DefaultReactSuggestionItem,
+  type SuggestionMenuProps
+} from '@blocknote/react'
+import { filterSuggestionItems } from '@blocknote/core/extensions'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { withCollaboration } from '@blocknote/core/yjs'
@@ -21,6 +28,45 @@ import { useUI, type HeadingNumberStyle } from '@/store/useUI'
 import { toast } from '@/store/useToast'
 import { debounce } from '@/lib/util'
 import { useCollaboration, type CollaborationSession } from '@/lib/collab'
+
+function SearchableSlashMenu({ query, ...props }: SuggestionMenuProps<DefaultReactSuggestionItem> & { query: string }) {
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+  }, [props.selectedIndex])
+  return (
+    <div className="slash-search-menu">
+      <div className="slash-search-box" aria-hidden="true">
+        <span>⌕</span>
+        <span className={query ? '' : 'placeholder'}>{query || '输入“一级”或“H1”搜索命令'}</span>
+      </div>
+      <div id="bn-suggestion-menu" className="custom-suggestion-list" role="listbox" ref={listRef}>
+        {props.loadingState !== 'loaded' && <div className="custom-suggestion-empty">正在搜索…</div>}
+        {props.loadingState === 'loaded' && props.items.length === 0 && (
+          <div className="custom-suggestion-empty">没有匹配的命令</div>
+        )}
+        {props.items.map((item, index) => {
+          const showGroup = index === 0 || props.items[index - 1]?.group !== item.group
+          return (
+            <div key={`${item.group || ''}:${item.title}`}>
+              {showGroup && item.group && <div className="custom-suggestion-group">{item.group}</div>}
+              <button
+                type="button"
+                role="option"
+                aria-selected={props.selectedIndex === index}
+                className="custom-suggestion-item"
+                onClick={() => props.onItemClick?.(item)}
+              >
+                <span className="custom-suggestion-icon">{item.icon}</span>
+                <span>{item.title}</span>
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 interface Heading {
   id: string
@@ -116,6 +162,13 @@ function isBlocksEmpty(blocks: any[]): boolean {
   }
   return true
 }
+function markdownCell(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, '<br>')
+    .trim()
+}
 
 function localPathFromFileUrl(url: string): string | null {
   try {
@@ -179,7 +232,9 @@ export function DocEditor({
   const headingNumberStyle = useUI((s) => s.headingNumberStyle)
   const [headings, setHeadings] = useState<Heading[]>([])
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null)
+  const [slashQuery, setSlashQuery] = useState('')
   const docAreaRef = useRef<HTMLDivElement>(null)
+  const tableInputRef = useRef<HTMLInputElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
   const normalizingListsRef = useRef(false)
   const presence = useCollaboration((s) => s.documents[path])
@@ -550,6 +605,51 @@ export function DocEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Excel / CSV 导入：读取工作簿中的每个工作表，并转换成笔记内可继续编辑的原生表格块。
+  const importSpreadsheet = async (file: File) => {
+    try {
+      const XLSX = await import('xlsx')
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
+      const sections: string[] = []
+      let truncated = false
+      for (const sheetName of workbook.SheetNames.slice(0, 12)) {
+        const sheet = workbook.Sheets[sheetName]
+        const source = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' })
+        const rows = source.filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim()))
+        if (!rows.length) continue
+        const width = Math.min(50, Math.max(...rows.map((row) => row.length), 1))
+        const limited = rows.slice(0, 1000).map((row) => Array.from({ length: width }, (_, index) => markdownCell(row[index])))
+        if (rows.length > 1000 || Math.max(...rows.map((row) => row.length), 1) > 50) truncated = true
+        const header = limited[0].map((cell, index) => cell || `列 ${index + 1}`)
+        const body = limited.slice(1)
+        if (!body.length) body.push(Array.from({ length: width }, () => ''))
+        const table = [
+          `| ${header.join(' | ')} |`,
+          `| ${header.map(() => '---').join(' | ')} |`,
+          ...body.map((row) => `| ${row.join(' | ')} |`)
+        ].join('\n')
+        sections.push(`${workbook.SheetNames.length > 1 ? `## ${markdownCell(sheetName)}\n\n` : ''}${table}`)
+      }
+      if (!sections.length) throw new Error('工作簿中没有可导入的数据')
+      const parsed = await editor.tryParseMarkdownToBlocks(sections.join('\n\n'))
+      const display = blocksForDisplay((parsed as any[]) || [], path)
+      const cursorBlock = editor.getTextCursorPosition?.().block || (editor.document as any[]).at(-1)
+      editor.insertBlocks(display as any, cursorBlock, 'after')
+      setModified(path, true)
+      toast(truncated ? '表格已导入；超大工作表按每页 1000 行、50 列截取' : '表格已导入，可直接继续编辑', 'success')
+    } catch (error) {
+      toast(`表格导入失败：${(error as Error).message}`, 'error')
+    } finally {
+      if (tableInputRef.current) tableInputRef.current.value = ''
+    }
+  }
+
+  useEffect(() => {
+    const open = () => tableInputRef.current?.click()
+    window.addEventListener('biji:import-table', open)
+    return () => window.removeEventListener('biji:import-table', open)
+  }, [])
+
   // 斜杠命令菜单的选项本身会循环选择，但从末项回到首项时，第三方菜单偶尔不会同步
   // 重置滚动位置，视觉上像是方向键失效。记录循环边界，并在菜单完成选中更新后校正滚动。
   useEffect(() => {
@@ -622,6 +722,17 @@ export function DocEditor({
   return (
     <div className="doc-with-outline">
       <div className="doc-area" ref={docAreaRef}>
+        <input
+          ref={tableInputRef}
+          className="visually-hidden-file-input"
+          type="file"
+          accept=".xlsx,.xls,.xlsm,.csv,.tsv"
+          tabIndex={-1}
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void importSpreadsheet(file)
+          }}
+        />
         <div className={`doc-scroll${headingNumbers ? ' numbered' : ''}`}>
           <input
             className="doc-title-input"
@@ -663,7 +774,16 @@ export function DocEditor({
               </span>
             )}
           </div>
-          <BlockNoteView editor={editor} theme={theme === 'dark' ? 'dark' : 'light'} onChange={onContentChange} />
+          <BlockNoteView editor={editor} theme={theme === 'dark' ? 'dark' : 'light'} onChange={onContentChange} slashMenu={false}>
+            <SuggestionMenuController
+              triggerCharacter="/"
+              getItems={async (query) => {
+                setSlashQuery(query)
+                return filterSuggestionItems(getDefaultReactSlashMenuItems(editor), query)
+              }}
+              suggestionMenuComponent={(props) => <SearchableSlashMenu {...props} query={slashQuery} />}
+            />
+          </BlockNoteView>
           <CodeGutters scrollRef={docAreaRef} />
           {headingNumbers && <HeadingNumbers scrollRef={docAreaRef} numbers={headingNums} />}
         </div>

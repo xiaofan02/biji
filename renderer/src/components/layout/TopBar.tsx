@@ -117,6 +117,9 @@ export function TopBar() {
     ])
   }
 
+  const nextTheme = theme === 'light' ? 'paper' : theme === 'paper' ? 'dark' : 'light'
+  const themeLabel = theme === 'light' ? '浅色' : theme === 'paper' ? '书页护眼' : '深色'
+
   return (
     <header className="topbar">
       <button className="icon-btn" title="折叠侧栏" onClick={toggleSidebar}>
@@ -188,6 +191,9 @@ export function TopBar() {
         <button className="icon-btn" title="新建文档 (Ctrl+N)" onClick={onNewNote}>
           <Icon name="file-plus" />
         </button>
+        <button className="icon-btn" title="导入 Excel / CSV 为可编辑表格" onClick={() => window.dispatchEvent(new CustomEvent('biji:import-table'))}>
+          <Icon name="table" />
+        </button>
         <button className="icon-btn" title="导出 (Markdown / PDF / Word)" onClick={openExportMenu}>
           <Icon name="download" />
         </button>
@@ -207,10 +213,10 @@ export function TopBar() {
         </button>
         <button
           className="icon-btn"
-          title="切换主题"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          title={`当前：${themeLabel}；点击切换主题`}
+          onClick={() => setTheme(nextTheme)}
         >
-          <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+          <Icon name={theme === 'dark' ? 'moon' : theme === 'paper' ? 'book-open' : 'sun'} />
         </button>
         <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)}>
           <Icon name="settings" />

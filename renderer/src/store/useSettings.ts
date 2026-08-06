@@ -27,11 +27,13 @@ export const useSettings = create<SettingsState>((set) => ({
     ])
     set({ workspace, theme: theme || 'light', fontSize: fontSize || 16, loaded: true })
     document.documentElement.setAttribute('data-theme', theme || 'light')
+    void ipc.sys.setWindowTheme(theme || 'light')
   },
 
   setTheme: async (t) => {
     set({ theme: t })
     document.documentElement.setAttribute('data-theme', t)
+    void ipc.sys.setWindowTheme(t)
     await ipc.settings.set('theme', t)
   },
 

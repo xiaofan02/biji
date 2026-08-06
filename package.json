@@ -1,6 +1,6 @@
 {
   "name": "moqi",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
   "main": "app-build/main/index.js",
   "author": "biji",
@@ -53,6 +53,7 @@
     "shiki": "^4.0.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "y-indexeddb": "^9.0.12",
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.7",

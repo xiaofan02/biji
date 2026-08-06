@@ -665,7 +665,7 @@
 /* ===== 现代工作台外观：克制的层次、材质与状态反馈 ===== */
 .topbar {
   height: 54px;
-  padding: 0 14px;
+  padding: 0 148px 0 14px;
   gap: 10px;
   background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
   border-bottom-color: var(--border-light);
@@ -815,6 +815,12 @@
   background: var(--bg-elevated);
   box-shadow: 0 14px 44px color-mix(in srgb, #11182a 7%, transparent);
 }
+[data-theme='paper'] .doc-scroll {
+  background:
+    linear-gradient(rgba(255, 250, 240, 0.94), rgba(255, 250, 240, 0.94)),
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(91, 78, 56, 0.035) 31px 32px);
+  box-shadow: 0 16px 46px rgba(75, 61, 40, 0.12);
+}
 .doc-title-input {
   font-size: 28px;
   font-weight: 650;
@@ -852,6 +858,11 @@
   .brand-version { display: none; }
   .topbar .brand { min-width: auto; }
   .doc-scroll { margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+}
+@media (max-width: 1180px) {
+  .topbar { gap: 7px; }
+  .topbar .search-box { width: 210px; }
+  .topbar .update-btn span { display: none; }
 }
 .status-saved {
   color: var(--text-tertiary);

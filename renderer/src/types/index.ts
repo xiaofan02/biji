@@ -60,7 +60,7 @@ export interface TelnetHost {
   group?: string
 }
 
-export type Theme = 'light' | 'dark'
+export type Theme = 'light' | 'paper' | 'dark'
 
 // .bnote 文档(JSON 为主):blocks 为 BlockNote 的 PartialBlock[]
 export interface BijiDoc {

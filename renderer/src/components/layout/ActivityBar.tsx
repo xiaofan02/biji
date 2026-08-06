@@ -3,7 +3,7 @@ import { usePanes, findLeafById, type PaneContent } from '@/store/usePanes'
 import { useAuth } from '@/store/useAuth'
 import { Icon, type IconName } from '@/components/common/Icon'
 
-// 左侧活动栏:侧栏开关 + 视图切换(文档/终端/AI/工作流,各「独占整页」) + 账号 + 设置。
+// 左侧活动栏:资料库开关 + 专用工作区(终端/AI/工作流) + 账号 + 设置。
 // 点击某视图 = 该功能铺满工作区(focusOrOpen 用 maximizedId 独占,其余面板不卸载、连接保持);
 // 高亮当前独占的视图。需要并排组合时,在面板头点「还原」或拆分按钮。
 export function ActivityBar() {
@@ -36,7 +36,6 @@ export function ActivityBar() {
       >
         <Icon name="panel-left" size={22} />
       </button>
-      {viewItem('editor', 'file-text', '文档')}
       {viewItem('terminal', 'terminal', '远程终端')}
       {viewItem('ai', 'sparkles', 'AI 助手')}
       {viewItem('workflow', 'workflow', '自动化工作流')}
