@@ -63,6 +63,9 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS ydoc BYTEA;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS content JSONB;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'team';
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_nodes_visibility_owner ON nodes(visibility, owner_id);
 `
 
 export async function migrate(): Promise<void> {

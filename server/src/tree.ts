@@ -16,6 +16,8 @@ interface NodeRow {
   parent: string
   ext: string | null
   title: string | null
+  visibility: 'private' | 'team'
+  owner_id: string | null
 }
 
 export interface TreeNode {
@@ -25,6 +27,8 @@ export interface TreeNode {
   path: string
   ext?: string
   title?: string
+  visibility: 'private' | 'team'
+  ownerId?: string
   children?: TreeNode[]
 }
 
@@ -53,8 +57,12 @@ treeRouter.use(authMiddleware)
 // 整棵树(嵌套)。目录在前,再按中文名排序——与旧 walkDir 行为一致。
 treeRouter.get(
   '/tree',
-  asyncHandler(async (_req, res) => {
-    const { rows } = await pool.query<NodeRow>('SELECT id, type, name, path, parent, ext, title FROM nodes')
+  asyncHandler(async (req, res) => {
+    const { rows } = await pool.query<NodeRow>(
+      `SELECT id, type, name, path, parent, ext, title, visibility, owner_id FROM nodes
+       WHERE visibility='team' OR owner_id=$1`,
+      [req.user!.id]
+    )
     const byParent = new Map<string, NodeRow[]>()
     for (const r of rows) {
       const arr = byParent.get(r.parent) ?? []
@@ -71,6 +79,8 @@ treeRouter.get(
         path: k.path,
         ext: k.ext ?? undefined,
         title: k.title ?? undefined,
+        visibility: k.visibility,
+        ownerId: k.owner_id ?? undefined,
         children: k.type === 'dir' ? build(k.path) : undefined
       }))
     }
@@ -82,27 +92,54 @@ treeRouter.get(
 treeRouter.post(
   '/nodes',
   asyncHandler(async (req, res) => {
-    const { parent = '', type } = (req.body ?? {}) as { parent?: string; name?: string; type?: string }
+    const { parent = '', type, visibility = 'private' } = (req.body ?? {}) as {
+      parent?: string
+      name?: string
+      type?: string
+      visibility?: string
+    }
     const name = cleanName((req.body ?? {}).name)
     if (type !== 'dir' && type !== 'file') throw new HttpError(400, 'type 必须是 dir 或 file')
+    if (visibility !== 'private' && visibility !== 'team') throw new HttpError(400, 'visibility 必须是 private 或 team')
     const path = joinPath(String(parent), name)
+    if (parent) {
+      const allowedParent = await pool.query(
+        `SELECT 1 FROM nodes WHERE path=$1 AND type='dir' AND (visibility='team' OR owner_id=$2)`,
+        [String(parent), req.user!.id]
+      )
+      if (!allowedParent.rowCount) throw new HttpError(403, '无权在该目录中创建内容')
+    }
     const dup = await pool.query('SELECT 1 FROM nodes WHERE path=$1', [path])
     if (dup.rowCount) throw new HttpError(409, '同名项已存在')
     const { rows } = await pool.query<NodeRow>(
-      'INSERT INTO nodes (type, name, path, parent, ext) VALUES ($1,$2,$3,$4,$5) RETURNING id, type, name, path, parent, ext, title',
-      [type, name, path, String(parent), type === 'file' ? extOf(name) : null]
+      `INSERT INTO nodes (type, name, path, parent, ext, visibility, owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id, type, name, path, parent, ext, title, visibility, owner_id`,
+      [type, name, path, String(parent), type === 'file' ? extOf(name) : null, visibility, req.user!.id]
     )
     res.json({ node: rows[0] })
   })
 )
 
 // 把 oldPath 重定位到 newParent 下、改名 newName。文件夹则连同所有子孙节点改写路径前缀。事务保证一致。
-async function relocate(oldPath: string, newParent: string, newName: string): Promise<string> {
+async function relocate(oldPath: string, newParent: string, newName: string, userId: string): Promise<string> {
   const newPath = joinPath(newParent, newName)
   if (newPath === oldPath) return oldPath
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    const source = await client.query(
+      `SELECT 1 FROM nodes WHERE path=$1 AND (visibility='team' OR owner_id=$2)`,
+      [oldPath, userId]
+    )
+    if (!source.rowCount) throw new HttpError(404, '源节点不存在或无权操作')
+    const blocked = await client.query(
+      `SELECT 1 FROM nodes
+       WHERE (path=$1 OR starts_with(path, $2)) AND visibility='private' AND owner_id<>$3
+       LIMIT 1`,
+      [oldPath, oldPath + '/', userId]
+    )
+    if (blocked.rowCount) throw new HttpError(403, '目录中包含其他成员的个人内容，不能整体移动或重命名')
     const dup = await client.query('SELECT 1 FROM nodes WHERE path=$1', [newPath])
     if (dup.rowCount) throw new HttpError(409, '目标位置已存在同名项')
     // 自身 + 所有子孙(starts_with 避免 LIKE 通配符转义问题)
@@ -143,9 +180,12 @@ treeRouter.post(
     const { path } = (req.body ?? {}) as { path?: string; newName?: string }
     const newName = cleanName((req.body ?? {}).newName)
     if (!path) throw new HttpError(400, '缺少 path')
-    const { rows } = await pool.query<NodeRow>('SELECT parent FROM nodes WHERE path=$1', [path])
+    const { rows } = await pool.query<NodeRow>(
+      `SELECT parent FROM nodes WHERE path=$1 AND (visibility='team' OR owner_id=$2)`,
+      [path, req.user!.id]
+    )
     if (!rows.length) throw new HttpError(404, '节点不存在')
-    const newPath = await relocate(path, rows[0]!.parent, newName)
+    const newPath = await relocate(path, rows[0]!.parent, newName, req.user!.id)
     res.json({ path: newPath })
   })
 )
@@ -163,10 +203,13 @@ treeRouter.post(
     // 根目录可以直接作为目标；其余目标必须是存在的目录，避免产生 parent
     // 指向不存在节点的“孤儿”记录，导致文件从树中消失。
     if (targetDir) {
-      const { rows } = await pool.query<{ type: string }>('SELECT type FROM nodes WHERE path=$1', [targetDir])
+      const { rows } = await pool.query<{ type: string }>(
+        `SELECT type FROM nodes WHERE path=$1 AND (visibility='team' OR owner_id=$2)`,
+        [targetDir, req.user!.id]
+      )
       if (!rows.length || rows[0]?.type !== 'dir') throw new HttpError(400, '目标目录不存在')
     }
-    const newPath = await relocate(path, targetDir, name)
+    const newPath = await relocate(path, targetDir, name, req.user!.id)
     res.json({ path: newPath })
   })
 )
@@ -181,6 +224,18 @@ treeRouter.delete(
   asyncHandler(async (req, res) => {
     const { path } = (req.body ?? {}) as { path?: string }
     if (!path) throw new HttpError(400, '缺少 path')
+    const source = await pool.query(
+      `SELECT 1 FROM nodes WHERE path=$1 AND (visibility='team' OR owner_id=$2)`,
+      [path, req.user!.id]
+    )
+    if (!source.rowCount) throw new HttpError(404, '节点不存在或无权删除')
+    const blocked = await pool.query(
+      `SELECT 1 FROM nodes
+       WHERE (path=$1 OR starts_with(path, $2)) AND visibility='private' AND owner_id<>$3
+       LIMIT 1`,
+      [path, path + '/', req.user!.id]
+    )
+    if (blocked.rowCount) throw new HttpError(403, '目录中包含其他成员的个人内容，不能整体删除')
     await pool.query('DELETE FROM nodes WHERE path=$1 OR starts_with(path, $2)', [path, path + '/'])
     res.json({ ok: true })
   })
@@ -197,10 +252,11 @@ treeRouter.get(
     }
     const like = `%${q}%`
     const { rows } = await pool.query<NodeRow>(
-      `SELECT id, type, name, path, parent, ext, title FROM nodes
+      `SELECT id, type, name, path, parent, ext, title, visibility, owner_id FROM nodes
        WHERE type='file' AND (name ILIKE $1 OR title ILIKE $1)
+         AND (visibility='team' OR owner_id=$2)
        ORDER BY name LIMIT 200`,
-      [like]
+      [like, req.user!.id]
     )
     res.json({
       results: rows.map((r) => ({ path: r.path, name: r.title || r.name, match: 'filename' as const }))
@@ -215,13 +271,101 @@ treeRouter.get(
 
 // 取正文:返回该文件节点的 content(无内容则 null)与稳定 id(= Yjs 房间名,供 Phase 3 用)。
 treeRouter.get(
+  '/node',
+  asyncHandler(async (req, res) => {
+    const path = String(req.query.path ?? '')
+    if (!path) throw new HttpError(400, '缺少 path')
+    const { rows } = await pool.query<NodeRow>(
+      `SELECT id, type, name, path, parent, ext, title, visibility, owner_id FROM nodes
+       WHERE path=$1 AND (visibility='team' OR owner_id=$2)`,
+      [path, req.user!.id]
+    )
+    const node = rows[0]
+    if (!node) throw new HttpError(404, '节点不存在')
+    res.json({
+      node: {
+        id: node.id,
+        type: node.type,
+        name: node.name,
+        path: node.path,
+        ext: node.ext ?? undefined,
+        title: node.title ?? undefined,
+        visibility: node.visibility,
+        ownerId: node.owner_id ?? undefined
+      }
+    })
+  })
+)
+
+// 个人/团队切换。只有创建者能改变范围；团队成员可以共同编辑，但不能擅自改变公开级别。
+treeRouter.put(
+  '/nodes/visibility',
+  asyncHandler(async (req, res) => {
+    const { path, visibility } = (req.body ?? {}) as { path?: string; visibility?: string }
+    if (!path) throw new HttpError(400, '缺少 path')
+    if (visibility !== 'private' && visibility !== 'team') throw new HttpError(400, '范围必须是 private 或 team')
+    const { rows } = await pool.query<{ id: string; type: string; owner_id: string | null }>(
+      'SELECT id, type, owner_id FROM nodes WHERE path=$1',
+      [path]
+    )
+    const node = rows[0]
+    if (!node) throw new HttpError(404, '节点不存在')
+    const claimingLegacyNode = !node.owner_id && req.user!.role === 'admin'
+    if (node.owner_id !== req.user!.id && !claimingLegacyNode) {
+      throw new HttpError(403, '只有内容创建者可以修改个人/团队范围')
+    }
+
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+      if (claimingLegacyNode) {
+        await client.query(
+          `UPDATE nodes SET owner_id=$1
+           WHERE (path=$2 OR starts_with(path, $3)) AND owner_id IS NULL`,
+          [req.user!.id, path, path + '/']
+        )
+      }
+      if (node.type === 'dir') {
+        await client.query(
+          `UPDATE nodes SET visibility=$1, updated_at=now()
+           WHERE (path=$2 OR starts_with(path, $3)) AND owner_id=$4`,
+          [visibility, path, path + '/', req.user!.id]
+        )
+      } else {
+        await client.query('UPDATE nodes SET visibility=$1, updated_at=now() WHERE id=$2', [visibility, node.id])
+      }
+      if (visibility === 'team') {
+        const parts = path.split('/')
+        parts.pop()
+        let ancestor = ''
+        for (const part of parts) {
+          ancestor = ancestor ? `${ancestor}/${part}` : part
+          await client.query(
+            `UPDATE nodes SET visibility='team', updated_at=now() WHERE path=$1 AND owner_id=$2`,
+            [ancestor, req.user!.id]
+          )
+        }
+      }
+      await client.query('COMMIT')
+      res.json({ ok: true, visibility, ownerId: req.user!.id })
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  })
+)
+
+treeRouter.get(
   '/doc',
   asyncHandler(async (req, res) => {
     const path = String(req.query.path ?? '')
     if (!path) throw new HttpError(400, '缺少 path')
     const { rows } = await pool.query<{ id: string; content: unknown }>(
-      "SELECT id, content FROM nodes WHERE path=$1 AND type='file'",
-      [path]
+      `SELECT id, content FROM nodes
+       WHERE path=$1 AND type='file' AND (visibility='team' OR owner_id=$2)`,
+      [path, req.user!.id]
     )
     const row = rows[0]
     if (!row) throw new HttpError(404, '文档不存在')
@@ -239,8 +383,8 @@ treeRouter.put(
     const title = typeof doc.title === 'string' && doc.title.trim() ? doc.title.trim() : null
     const { rowCount } = await pool.query(
       `UPDATE nodes SET content=$1, title=COALESCE($2, title), updated_at=now(), updated_by=$3
-       WHERE path=$4 AND type='file'`,
-      [JSON.stringify(doc), title, req.user?.id ?? null, path]
+       WHERE path=$4 AND type='file' AND (visibility='team' OR owner_id=$3)`,
+      [JSON.stringify(doc), title, req.user!.id, path]
     )
     if (!rowCount) throw new HttpError(404, '文档不存在')
     res.json({ ok: true })
@@ -270,8 +414,10 @@ treeRouter.post(
     try {
       await client.query('BEGIN')
       const { rows } = await client.query<{ id: string; ydoc: Buffer | null }>(
-        "SELECT id, ydoc FROM nodes WHERE path=$1 AND type='file' FOR UPDATE",
-        [path]
+        `SELECT id, ydoc FROM nodes
+         WHERE path=$1 AND type='file' AND (visibility='team' OR owner_id=$2)
+         FOR UPDATE`,
+        [path, req.user!.id]
       )
       const row = rows[0]
       if (!row) throw new HttpError(404, '文档不存在')

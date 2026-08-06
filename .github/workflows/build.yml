@@ -40,6 +40,12 @@ jobs:
       - name: Build Windows installer & portable
         run: npm run dist:win
 
+      - name: Verify serial component inside packaged app
+        shell: pwsh
+        run: |
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          & .\node_modules\electron\dist\electron.exe scripts\serial-package-smoke.cjs
+
       - name: List built files
         run: dir release
         shell: cmd

@@ -62,6 +62,10 @@ export default function App() {
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
       ipc.menu.on('menu:toggle-ai', () => usePanes.getState().focusOrOpen('ai')),
       ipc.menu.on('menu:toggle-terminal', () => usePanes.getState().focusOrOpen('terminal')),
+      ipc.menu.on('app:toggle-quick-ai', () => {
+        const ui = useUI.getState()
+        ui.setQuickAiOpen(!ui.quickAiOpen)
+      }),
       ipc.menu.on('menu:settings', () => useUI.getState().setSettingsOpen(true)),
       ipc.menu.on('workspace:changed', async (newWs: unknown) => {
         useSettings.getState().setWorkspace(newWs as string)
@@ -108,8 +112,8 @@ export default function App() {
         ui.setQuickAiOpen(!ui.quickAiOpen)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
   // 抑制 "ResizeObserver loop completed with undelivered notifications" 良性警告

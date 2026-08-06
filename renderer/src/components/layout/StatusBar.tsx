@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react'
 import { useTabs } from '@/store/useTabs'
 import { useSettings } from '@/store/useSettings'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useAuth } from '@/store/useAuth'
-import { useSync, pushAll, pullAll, pushDoc, type NoteSyncStatus, type SyncStatus } from '@/lib/sync'
+import { useSync, pushAll, pullAll, pushDoc, localToVirtual, type NoteSyncStatus, type SyncStatus } from '@/lib/sync'
+import { api, ApiError } from '@/lib/api'
 import { loadDoc } from '@/lib/note'
 import { toast } from '@/store/useToast'
 import { useCollaboration } from '@/lib/collab'
@@ -40,9 +42,47 @@ export function StatusBar() {
   const active = useTabs((s) => s.tabs.find((t) => t.path === s.activePath) || null)
   const workspace = useSettings((s) => s.workspace)
   const loggedIn = useAuth((s) => s.status === 'in')
+  const user = useAuth((s) => s.user)
   const syncStatus = useSync((s) => s.status)
   const noteSync = useSync((s) => (active?.kind === 'bnote' ? s.notes[active.path] : undefined))
   const collaboration = useCollaboration((s) => (active?.kind === 'bnote' ? s.documents[active.path] : undefined))
+  const [access, setAccess] = useState<{ visibility: 'private' | 'team'; ownerId?: string } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!loggedIn || !active || active.kind !== 'bnote') {
+      setAccess(null)
+      return
+    }
+    const vpath = localToVirtual(active.path)
+    if (!vpath) return
+    api.node(vpath)
+      .then((node) => {
+        if (!cancelled) setAccess({ visibility: node.visibility || 'team', ownerId: node.ownerId })
+      })
+      .catch((error) => {
+        if (!cancelled) setAccess(error instanceof ApiError && error.status === 404 ? null : null)
+      })
+    return () => { cancelled = true }
+  }, [active?.path, active?.kind, loggedIn, noteSync?.updatedAt])
+
+  const toggleAccess = async () => {
+    if (!active || active.kind !== 'bnote' || !access) return
+    if (access.ownerId !== user?.id && !(user?.role === 'admin' && !access.ownerId)) {
+      toast('这篇团队文档由旧版本创建，暂时不能改变访问范围', 'info')
+      return
+    }
+    const vpath = localToVirtual(active.path)
+    if (!vpath) return
+    const next = access.visibility === 'private' ? 'team' : 'private'
+    try {
+      await api.setVisibility(vpath, next)
+      setAccess({ ...access, visibility: next, ownerId: user?.id })
+      toast(next === 'team' ? '已设为团队文档，同事可以查看并共同编辑' : '已设为个人文档，仅你可见', 'success')
+    } catch (error) {
+      toast('修改访问范围失败：' + (error as Error).message, 'error')
+    }
+  }
 
   const onRetryNote = async () => {
     if (!active || active.kind !== 'bnote' || noteSync?.status !== 'error') return
@@ -111,6 +151,19 @@ export function StatusBar() {
       )}
       {loggedIn && (
         <>
+          {access && (
+            <span
+              onClick={() => void toggleAccess()}
+              title={
+                access.visibility === 'team'
+                  ? '团队文档：公司成员可查看并共同编辑，点击改为个人'
+                  : '个人文档：仅自己可见，点击开放给团队'
+              }
+              style={{ ...linkStyle, color: access.visibility === 'team' ? '#3370ff' : undefined }}
+            >
+              {access.visibility === 'team' ? '◉ 团队' : '● 个人'}
+            </span>
+          )}
           <span
             title={noteSync?.error || (noteSync ? '当前笔记同步状态' : '云端同步状态')}
             onClick={onRetryNote}

@@ -10,6 +10,9 @@ export interface TreeNode {
   id?: string
   /** 文档标题(服务器从 Y.Doc 提取回写,供树展示);本地模式为空 */
   title?: string
+  /** 云端访问范围：个人仅创建者可见，团队对所有已登录成员可见。 */
+  visibility?: 'private' | 'team'
+  ownerId?: string
 }
 
 export interface SearchResult {

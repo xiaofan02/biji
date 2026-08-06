@@ -55,8 +55,17 @@ export interface UploadedAsset {
 
 export const api = {
   tree: (): Promise<TreeNode[]> => jget('/api/tree').then((d) => d.tree as TreeNode[]),
-  createNode: (parent: string, name: string, type: 'dir' | 'file'): Promise<TreeNode> =>
-    jsend('POST', '/api/nodes', { parent, name, type }).then((d) => d.node as TreeNode),
+  node: (path: string): Promise<TreeNode> =>
+    jget('/api/node?path=' + encodeURIComponent(path)).then((d) => d.node as TreeNode),
+  createNode: (
+    parent: string,
+    name: string,
+    type: 'dir' | 'file',
+    visibility: 'private' | 'team' = 'private'
+  ): Promise<TreeNode> =>
+    jsend('POST', '/api/nodes', { parent, name, type, visibility }).then((d) => d.node as TreeNode),
+  setVisibility: (path: string, visibility: 'private' | 'team'): Promise<void> =>
+    jsend('PUT', '/api/nodes/visibility', { path, visibility }).then(() => undefined),
   rename: (path: string, newName: string): Promise<string> =>
     jsend('POST', '/api/nodes/rename', { path, newName }).then((d) => d.path as string),
   move: (path: string, destDir: string): Promise<string> =>

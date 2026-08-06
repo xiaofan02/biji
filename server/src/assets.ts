@@ -21,6 +21,13 @@ assetsRouter.post(
     const file = req.file
     if (!file) throw new HttpError(400, '缺少文件')
     const nodeId = (req.body?.nodeId as string | undefined) || null
+    if (nodeId) {
+      const access = await pool.query(
+        `SELECT 1 FROM nodes WHERE id=$1 AND type='file' AND (visibility='team' OR owner_id=$2)`,
+        [nodeId, req.user!.id]
+      )
+      if (!access.rowCount) throw new HttpError(403, '无权向该文档上传附件')
+    }
     const { rows } = await pool.query<{ id: string }>(
       'INSERT INTO assets (node_id, filename, mime, data) VALUES ($1,$2,$3,$4) RETURNING id',
       [nodeId, file.originalname || 'image', file.mimetype || 'application/octet-stream', file.buffer]

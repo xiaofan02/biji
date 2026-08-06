@@ -224,6 +224,24 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.sm-host-delete {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+.sm-host:hover .sm-host-delete,
+.sm-host:focus-within .sm-host-delete { opacity: 1; }
+.sm-host-delete:hover { color: #e5484d; background: color-mix(in srgb, #e5484d 10%, transparent); }
 .qc-save-option {
   display: inline-flex;
   align-items: center;

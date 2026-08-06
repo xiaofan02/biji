@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import { ipc } from '@/lib/ipc'
 import { useSettings } from '@/store/useSettings'
 import { toast } from '@/store/useToast'
+import { confirm } from '@/store/useConfirm'
 import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
 import { usePanes } from '@/store/usePanes'
@@ -414,7 +415,8 @@ function FolderNode({
   expanded,
   toggle,
   connected,
-  onConnect
+  onConnect,
+  onDelete
 }: {
   folder: TreeFolder
   depth: number
@@ -422,6 +424,7 @@ function FolderNode({
   toggle: (path: string) => void
   connected: Set<string>
   onConnect: (h: HostLeaf) => void
+  onDelete: (h: HostLeaf) => void
 }) {
   return (
     <>
@@ -446,6 +449,7 @@ function FolderNode({
                 toggle={toggle}
                 connected={connected}
                 onConnect={onConnect}
+                onDelete={onDelete}
               />
             )}
           </div>
@@ -464,6 +468,16 @@ function FolderNode({
           </span>
           <span className="sm-label">{h.name || hostAddr(h)}</span>
           {connected.has(h.id) && <span className="sm-conn-dot" title="已有连接" />}
+          <button
+            className="sm-host-delete"
+            title="删除已保存会话"
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete(h)
+            }}
+          >
+            <Icon name="trash" size={13} />
+          </button>
         </div>
       ))}
     </>
@@ -474,6 +488,7 @@ function SessionManager({
   leaves,
   connected,
   onConnect,
+  onDelete,
   onRefresh,
   onImport,
   onExport
@@ -481,6 +496,7 @@ function SessionManager({
   leaves: HostLeaf[]
   connected: Set<string>
   onConnect: (h: HostLeaf) => void
+  onDelete: (h: HostLeaf) => void
   onRefresh: () => void
   onImport: () => void
   onExport: () => void
@@ -556,11 +572,29 @@ function SessionManager({
                   {h.group && <span className="sm-host-group"> · {h.group}</span>}
                 </span>
                 {connected.has(h.id) && <span className="sm-conn-dot" />}
+                <button
+                  className="sm-host-delete"
+                  title="删除已保存会话"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDelete(h)
+                  }}
+                >
+                  <Icon name="trash" size={13} />
+                </button>
               </div>
             ))
           )
         ) : (
-          <FolderNode folder={tree} depth={0} expanded={expanded} toggle={toggle} connected={connected} onConnect={onConnect} />
+          <FolderNode
+            folder={tree}
+            depth={0}
+            expanded={expanded}
+            toggle={toggle}
+            connected={connected}
+            onConnect={onConnect}
+            onDelete={onDelete}
+          />
         )}
       </div>
     </div>
@@ -679,6 +713,22 @@ export function TerminalPanel() {
     setActiveKey(key)
   }
 
+  const deleteHost = async (leaf: HostLeaf) => {
+    const accepted = await confirm({
+      title: '删除已保存会话',
+      message: `确定删除“${leaf.name || hostAddr(leaf)}”吗？已打开的连接不会被中断。`,
+      confirmText: '删除',
+      danger: true
+    })
+    if (!accepted) return
+    const key = leaf.kind === 'ssh' ? 'sshHosts' : leaf.kind === 'telnet' ? 'telnetHosts' : 'serialHosts'
+    const list = (((await ipc.settings.get(key)) as Array<{ id?: string }>) || []).filter((item) => item.id !== leaf.host.id)
+    await ipc.settings.set(key, list)
+    loadHosts()
+    window.dispatchEvent(new CustomEvent('biji:terminal-hosts-changed'))
+    toast('已删除保存的会话', 'success')
+  }
+
   const closeSession = (key: string) => {
     setTabs((prev) => {
       const next = prev.filter((t) => t.key !== key)
@@ -739,6 +789,7 @@ export function TerminalPanel() {
             leaves={leaves}
             connected={connected}
             onConnect={connectHost}
+            onDelete={(leaf) => void deleteHost(leaf)}
             onRefresh={loadHosts}
             onImport={() => void importSessions()}
             onExport={() => void exportSessions()}

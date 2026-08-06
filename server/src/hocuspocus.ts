@@ -20,6 +20,12 @@ export const hocuspocus = Server.configure({
   async onAuthenticate(data) {
     try {
       const user = verifyToken(data.token)
+      const access = await pool.query(
+        `SELECT 1 FROM nodes
+         WHERE id=$1 AND type='file' AND (visibility='team' OR owner_id=$2)`,
+        [data.documentName, user.id]
+      )
+      if (!access.rowCount) throw new Error('无权访问该协作文档')
       console.log(`[collab] ✓ 鉴权通过 user=${user.username} doc=${data.documentName}`)
       return { user }
     } catch (e) {

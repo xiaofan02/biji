@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage, globalShortcut } from 'electron'
 import { join, dirname, extname, relative, isAbsolute, resolve, sep } from 'path'
 import fs from 'fs'
 import fsp from 'fs/promises'
@@ -7,6 +7,7 @@ import { autoUpdater } from 'electron-updater'
 import * as ai from './ai'
 import type { AIProvider, ChatMessage } from './ai'
 import { registerRemoteHandlers, closeAllSessions } from './remote'
+import { SerialPort } from 'serialport'
 
 // 主进程 —— 由 main.js 完整移植为 TS。
 // 渲染层切换为 React(electron-vite),markdown 渲染交给前端 BlockNote,故移除 md:render。
@@ -237,10 +238,23 @@ if (!hasSingleInstanceLock) {
   setupAutoUpdater()
   Menu.setApplicationMenu(buildMenu())
 
+  // 系统级 Ctrl+Space：在墨启的任意页面、甚至应用失去焦点时，也能召回 AI 悬浮助手。
+  // 注册失败通常代表快捷键被输入法或其他软件占用；渲染层仍保留应用内捕获作为兜底。
+  const registered = globalShortcut.register('CommandOrControl+Space', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.send('app:toggle-quick-ai')
+  })
+  if (!registered) console.warn('[shortcut] Ctrl+Space 注册失败，可能已被系统输入法或其他应用占用')
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('will-quit', () => globalShortcut.unregisterAll())
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
@@ -512,37 +526,21 @@ ipcMain.handle('fs:delete', async (_e, target: string) => {
 })
 ipcMain.handle('fs:workspace', () => store.get('workspace'))
 
-// ============ 串口(可选 native 模块 serialport) ============
-// ★用「拼接字符串 + eval-require」动态加载,使打包器不把 serialport 列为静态依赖;未安装 / 未为
-// Electron 重建(ABI 不匹配)时优雅降级(list 返回空、connect 抛友好错误),绝不影响主进程启动。
-let _SerialPort: any = undefined
-function loadSerialPort(): any {
-  if (_SerialPort !== undefined) return _SerialPort
-  try {
-    const name = 'serial' + 'port'
-    const mod = (0, eval)('require')(name)
-    _SerialPort = mod.SerialPort || mod
-  } catch {
-    _SerialPort = null
-  }
-  return _SerialPort
-}
+// ============ 串口(native 模块 serialport) ============
+// 静态导入让构建器明确携带依赖；正式包中的预编译 native binding 由 asarUnpack 解包加载。
 const serialSessions = new Map<string, any>()
 ipcMain.handle('serial:list', async () => {
-  const SP = loadSerialPort()
-  if (!SP) return []
   try {
-    return await SP.list()
+    return await SerialPort.list()
   } catch {
     return []
   }
 })
 ipcMain.handle('serial:connect', async (_e, cfg: { path: string; baudRate?: number }) => {
-  const SP = loadSerialPort()
-  if (!SP)
-    throw new Error('串口组件加载失败，请重新安装最新版墨启 MOQI')
   const id = `serial-${process.pid}-${Date.now()}`
-  const port = new SP({ path: cfg.path, baudRate: cfg.baudRate || 9600 })
+  const path = String(cfg.path || '').trim()
+  if (!path) throw new Error('请选择本机串口')
+  const port = new SerialPort({ path, baudRate: cfg.baudRate || 9600 })
   serialSessions.set(id, port)
   port.on('data', (data: Buffer) => mainWindow?.webContents.send(`term:data:${id}`, data.toString('utf-8')))
   port.on('error', (err: Error) => mainWindow?.webContents.send(`term:error:${id}`, err.message))
