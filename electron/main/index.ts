@@ -31,6 +31,15 @@ const store = new Store({
 }) as any
 
 let mainWindow: BrowserWindow | null = null
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+})
+
 const attachmentTempDir = join(app.getPath('temp'), 'Biji', 'attachments')
 
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
@@ -117,6 +126,7 @@ app.on('certificate-error', (event, _webContents, url, _error, _certificate, cal
 })
 
 function createWindow(): void {
+  let revealTimer: ReturnType<typeof setTimeout> | null = null
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -132,7 +142,6 @@ function createWindow(): void {
       height: 54
     },
     autoHideMenuBar: true,
-    backgroundMaterial: 'mica',
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -146,7 +155,20 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  // Windows 上 hidden title bar 与部分显卡/系统组合可能不会触发 ready-to-show。
+  // 页面完成加载时主动显示，并保留超时兜底，避免应用只启动后台进程却没有窗口。
+  const revealWindow = (): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (revealTimer) {
+      clearTimeout(revealTimer)
+      revealTimer = null
+    }
+    if (!mainWindow.isVisible()) mainWindow.show()
+    mainWindow.focus()
+  }
+  mainWindow.once('ready-to-show', revealWindow)
+  mainWindow.webContents.once('did-finish-load', revealWindow)
+  revealTimer = setTimeout(revealWindow, 2500)
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -174,6 +196,7 @@ function createWindow(): void {
   }
 
   mainWindow.on('closed', () => {
+    if (revealTimer) clearTimeout(revealTimer)
     mainWindow = null
     closeAllSessions()
   })
@@ -205,7 +228,9 @@ function workspaceEntryName(input: string): string {
   return name
 }
 
-app.whenReady().then(() => {
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else app.whenReady().then(() => {
   ensureWorkspace()
   createWindow()
   setupAutoUpdater()
