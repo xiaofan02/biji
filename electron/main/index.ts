@@ -21,6 +21,10 @@ const store = new Store({
     workspace: join(app.getPath('documents'), 'BijiNotes'),
     theme: 'light',
     fontSize: 16,
+    terminalFontSize: 16,
+    terminalColorScheme: 'traditional',
+    terminalFolders: [],
+    syncIntervalHours: 1,
     aiProviders: [],
     activeProvider: null,
     sshHosts: [],
@@ -702,6 +706,24 @@ ipcMain.handle('sys:choose-session-files', async () => {
     ]
   })
   return r.canceled ? [] : r.filePaths
+})
+ipcMain.handle('sys:choose-session-folder', async () => {
+  if (!mainWindow) return null
+  const r = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] })
+  if (r.canceled || !r.filePaths[0]) return null
+  const root = r.filePaths[0]
+  const files: string[] = []
+  const allowed = new Set(['.json', '.ini', '.mxtsessions', '.txt'])
+  const walk = async (dir: string): Promise<void> => {
+    if (files.length >= 5000) return
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(full)
+      else if (entry.isFile() && allowed.has(extname(entry.name).toLowerCase())) files.push(full)
+    }
+  }
+  await walk(root)
+  return { root, files }
 })
 ipcMain.handle('sys:choose-image', async () => {
   if (!mainWindow) return null

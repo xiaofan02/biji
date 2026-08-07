@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 export type RightPanel = 'ai' | 'terminal' | null
+export type ActivityView = 'library' | 'terminal' | 'ai' | 'workflow' | 'team'
 
 // 标题编号显示风格(顶栏 # 控制是否显示,这里控制格式):
 // arabic-dot=1. / arabic=1 / paren=(1) / cn=一级“一、”、子级“1.1” / cn-paren=(一)。
@@ -8,6 +9,7 @@ export type HeadingNumberStyle = 'arabic-dot' | 'arabic' | 'paren' | 'cn' | 'cn-
 
 interface UIState {
   rightPanel: RightPanel
+  activityView: ActivityView
   sidebarCollapsed: boolean
   settingsOpen: boolean
   loginOpen: boolean
@@ -18,6 +20,7 @@ interface UIState {
   sidebarWidth: number
   rightPanelWidth: number
   toggleRightPanel: (which: Exclude<RightPanel, null>) => void
+  setActivityView: (view: ActivityView) => void
   closeRightPanel: () => void
   toggleSidebar: () => void
   toggleOutline: () => void
@@ -32,6 +35,7 @@ interface UIState {
 
 export const useUI = create<UIState>((set, get) => ({
   rightPanel: null,
+  activityView: 'library',
   sidebarCollapsed: false,
   settingsOpen: false,
   loginOpen: false,
@@ -47,6 +51,7 @@ export const useUI = create<UIState>((set, get) => ({
     set({ rightPanel: cur === which ? null : which })
   },
   closeRightPanel: () => set({ rightPanel: null }),
+  setActivityView: (activityView) => set({ activityView, sidebarCollapsed: false }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen })),
   toggleHeadingNumbers: () => set((s) => ({ headingNumbers: !s.headingNumbers })),

@@ -26,6 +26,7 @@ import { useSettings } from '@/store/useSettings'
 import { useTabs } from '@/store/useTabs'
 import { useUI, type HeadingNumberStyle } from '@/store/useUI'
 import { toast } from '@/store/useToast'
+import { showContextMenu } from '@/store/useContextMenu'
 import { debounce } from '@/lib/util'
 import { useCollaboration, type CollaborationSession } from '@/lib/collab'
 
@@ -498,15 +499,28 @@ export function DocEditor({
         toast('导出失败:' + (e as Error).message, 'error')
       }
     }
+    const onExportHtml = async () => {
+      try {
+        const inner = await (editor as any).blocksToFullHTML(editor.document)
+        const saved = await ipc.exporter.saveText(docName() + '.html', fullExportHtml(docName(), inner), [
+          { name: 'HTML', extensions: ['html', 'htm'] }
+        ])
+        if (saved) toast('已导出 HTML', 'success')
+      } catch (e) {
+        toast('导出失败:' + (e as Error).message, 'error')
+      }
+    }
     window.addEventListener('biji:save', onSave)
     window.addEventListener('biji:export-md', onExportMd)
     window.addEventListener('biji:export-pdf', onExportPdf)
     window.addEventListener('biji:export-word', onExportWord)
+    window.addEventListener('biji:export-html', onExportHtml)
     return () => {
       window.removeEventListener('biji:save', onSave)
       window.removeEventListener('biji:export-md', onExportMd)
       window.removeEventListener('biji:export-pdf', onExportPdf)
       window.removeEventListener('biji:export-word', onExportWord)
+      window.removeEventListener('biji:export-html', onExportHtml)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, path])
@@ -719,9 +733,20 @@ export function DocEditor({
     return () => root.removeEventListener('dblclick', onDoubleClick)
   }, [editor])
 
+  const openDocumentMenu = (event: React.MouseEvent) => {
+    if ((event.target as HTMLElement).closest('input, textarea, [data-content-type="codeBlock"]')) return
+    const fire = (name: string) => () => window.dispatchEvent(new CustomEvent(name))
+    showContextMenu(event, [
+      { label: '导出 Markdown', iconName: 'file-text', onClick: fire('biji:export-md') },
+      { label: '导出 PDF', iconName: 'file', onClick: fire('biji:export-pdf') },
+      { label: '导出 Word', iconName: 'file', onClick: fire('biji:export-word') },
+      { label: '导出 HTML', iconName: 'file', onClick: fire('biji:export-html') }
+    ])
+  }
+
   return (
     <div className="doc-with-outline">
-      <div className="doc-area" ref={docAreaRef}>
+      <div className="doc-area" ref={docAreaRef} onContextMenu={openDocumentMenu}>
         <input
           ref={tableInputRef}
           className="visually-hidden-file-input"

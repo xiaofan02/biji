@@ -108,6 +108,7 @@ const api = {
     showInFolder: (p: string) => ipcRenderer.invoke('sys:show-in-folder', p),
     chooseFile: () => ipcRenderer.invoke('sys:choose-file'),
     chooseSessionFiles: () => ipcRenderer.invoke('sys:choose-session-files') as Promise<string[]>,
+    chooseSessionFolder: () => ipcRenderer.invoke('sys:choose-session-folder') as Promise<{ root: string; files: string[] } | null>,
     chooseFolder: () => ipcRenderer.invoke('sys:choose-folder'),
     chooseImage: () => ipcRenderer.invoke('sys:choose-image'),
     readFile: (p: string) => ipcRenderer.invoke('sys:read-file', p)

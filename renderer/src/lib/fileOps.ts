@@ -5,6 +5,7 @@ import { prompt } from '@/store/usePrompt'
 import { useTabs } from '@/store/useTabs'
 import { useWorkspace } from '@/store/useWorkspace'
 import { usePanes } from '@/store/usePanes'
+import { useUI } from '@/store/useUI'
 import { useSettings } from '@/store/useSettings'
 import { toast } from '@/store/useToast'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
@@ -27,6 +28,7 @@ export async function newDocFlow(dir: string): Promise<void> {
   usePanes.getState().focusOrOpen('editor')
   try {
     const path = await createDoc(dir, name)
+    useUI.getState().setActivityView('library')
     await useWorkspace.getState().refresh()
     useTabs.getState().open(path)
     useWorkspace.getState().setActivePath(path)
@@ -43,6 +45,7 @@ export async function quickNoteFlow(): Promise<void> {
     const inbox = joinPath(workspace, INBOX_FOLDER)
     await ipc.fs.create(workspace, INBOX_FOLDER, true)
     const path = await createDoc(inbox, quickNoteName())
+    useUI.getState().setActivityView('library')
     await useWorkspace.getState().refresh()
     useTabs.getState().open(path)
     useWorkspace.getState().setActivePath(path)

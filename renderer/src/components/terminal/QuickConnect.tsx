@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ipc } from '@/lib/ipc'
 import { usePanes } from '@/store/usePanes'
+import { useUI } from '@/store/useUI'
 import { useQuickConnect } from '@/store/useQuickConnect'
 import { toast } from '@/store/useToast'
 import { Icon } from '@/components/common/Icon'
@@ -147,6 +148,7 @@ export function QuickConnect() {
       toast(`保存会话失败：${(error as Error).message}`, 'error')
     }
     window.dispatchEvent(new CustomEvent('biji:terminal-connect', { detail: { kind, cfg, name, originId } }))
+    useUI.getState().setActivityView('terminal')
     usePanes.getState().focusOrOpen('terminal')
     setOpen(false)
   }

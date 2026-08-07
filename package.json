@@ -1,6 +1,6 @@
 {
   "name": "moqi",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
   "main": "app-build/main/index.js",
   "author": "biji",

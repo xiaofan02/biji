@@ -9,7 +9,6 @@ import { useWorkspace } from '@/store/useWorkspace'
 import { createDoc } from '@/lib/note'
 import { toast } from '@/store/useToast'
 import { prompt } from '@/store/usePrompt'
-import { showContextMenu } from '@/store/useContextMenu'
 import { Icon } from '@/components/common/Icon'
 import type { SearchResult } from '@/types'
 
@@ -23,10 +22,6 @@ type UpdateStatus = {
 
 export function TopBar() {
   const toggleSidebar = useUI((s) => s.toggleSidebar)
-  const toggleOutline = useUI((s) => s.toggleOutline)
-  const outlineOpen = useUI((s) => s.outlineOpen)
-  const headingNumbers = useUI((s) => s.headingNumbers)
-  const toggleHeadingNumbers = useUI((s) => s.toggleHeadingNumbers)
   const focusOrOpen = usePanes((s) => s.focusOrOpen)
   const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   const theme = useSettings((s) => s.theme)
@@ -92,6 +87,7 @@ export function TopBar() {
     if (name === null) return
     try {
       const path = await createDoc('', name)
+      useUI.getState().setActivityView('library')
       await refresh()
       openTab(path)
       setActivePath(path)
@@ -102,21 +98,12 @@ export function TopBar() {
   }
 
   const openResult = (path: string) => {
+    useUI.getState().setActivityView('library')
     openTab(path)
     setActivePath(path)
     focusOrOpen('editor')
     setShowResults(false)
     if (inputRef.current) inputRef.current.value = ''
-  }
-
-  const openExportMenu = (e: React.MouseEvent) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const fire = (name: string) => () => window.dispatchEvent(new CustomEvent(name))
-    showContextMenu({ clientX: r.left - 60, clientY: r.bottom + 4, preventDefault() {} }, [
-      { label: '导出 Markdown', iconName: 'file-text', onClick: fire('biji:export-md') },
-      { label: '导出 PDF', iconName: 'file', onClick: fire('biji:export-pdf') },
-      { label: '导出 Word', iconName: 'file', onClick: fire('biji:export-word') }
-    ])
   }
 
   const nextTheme = theme === 'light' ? 'paper' : theme === 'paper' ? 'dark' : 'light'
@@ -176,42 +163,11 @@ export function TopBar() {
           <Icon name={updateStatus.phase === 'downloaded' ? 'download' : 'refresh'} size={15} />
           <span>{updateLabel}</span>
         </button>
-        <button
-          className={`icon-btn${outlineOpen ? ' active' : ''}`}
-          title="目录"
-          onClick={toggleOutline}
-        >
-          <Icon name="list" />
-        </button>
-        <button
-          className={`icon-btn${headingNumbers ? ' active' : ''}`}
-          title="标题自动编号"
-          onClick={toggleHeadingNumbers}
-        >
-          <Icon name="hash" />
-        </button>
         <button className="icon-btn" title="新建文档 (Ctrl+N)" onClick={onNewNote}>
           <Icon name="file-plus" />
         </button>
         <button className="icon-btn" title="导入 Excel / CSV 为可编辑表格" onClick={() => window.dispatchEvent(new CustomEvent('biji:import-table'))}>
           <Icon name="table" />
-        </button>
-        <button className="icon-btn" title="导出 (Markdown / PDF / Word)" onClick={openExportMenu}>
-          <Icon name="download" />
-        </button>
-        <button
-          className="icon-btn"
-          title="AI 助手 (Ctrl+I)"
-          onClick={() => focusOrOpen('ai')}
-        >
-          <Icon name="sparkles" />
-        </button>
-        <button
-          className="icon-btn"
-          title="远程终端 (Ctrl+T)"
-          onClick={() => focusOrOpen('terminal')}
-        >
-          <Icon name="terminal" />
         </button>
         <button
           className="icon-btn"

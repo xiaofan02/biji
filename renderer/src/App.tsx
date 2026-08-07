@@ -25,10 +25,12 @@ import { QuickConnect } from '@/components/terminal/QuickConnect'
 import { useQuickConnect } from '@/store/useQuickConnect'
 import { LoginScreen } from '@/components/auth/LoginScreen'
 import { QuickAI } from '@/components/ai/QuickAI'
+import { configureSyncInterval, pushAll } from '@/lib/sync'
 
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
   const loaded = useSettings((s) => s.loaded)
+  const syncIntervalHours = useSettings((s) => s.syncIntervalHours)
 
   // 初始化:加载设置 + 刷新工作区(本地磁盘)+ 加载 AI 服务商
   useEffect(() => {
@@ -50,6 +52,18 @@ export default function App() {
     document.documentElement.style.setProperty('--editor-font-size', fontSize + 'px')
   }, [fontSize])
 
+  // 后台全量上传计划。0=暂停云端上传，但本地自动保存始终不受影响。
+  useEffect(() => {
+    if (!loaded) return
+    const enabled = syncIntervalHours > 0
+    configureSyncInterval(syncIntervalHours)
+    if (!enabled) return
+    const timer = window.setInterval(() => {
+      if (useAuth.getState().status === 'in') void pushAll().catch(() => undefined)
+    }, syncIntervalHours * 60 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [loaded, syncIntervalHours])
+
   // 本地优先:数据源永远是本机磁盘,登录/登出不再切换数据源或清空标签。
   // (登录仅用于身份 + 云端同步叠加层,见 lib/sync.ts。)
 
@@ -60,8 +74,14 @@ export default function App() {
       ipc.menu.on('menu:quick-note', () => void quickNoteFlow()),
       ipc.menu.on('menu:save', () => window.dispatchEvent(new CustomEvent('biji:save'))),
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
-      ipc.menu.on('menu:toggle-ai', () => usePanes.getState().focusOrOpen('ai')),
-      ipc.menu.on('menu:toggle-terminal', () => usePanes.getState().focusOrOpen('terminal')),
+      ipc.menu.on('menu:toggle-ai', () => {
+        useUI.getState().setActivityView('ai')
+        usePanes.getState().focusOrOpen('ai')
+      }),
+      ipc.menu.on('menu:toggle-terminal', () => {
+        useUI.getState().setActivityView('terminal')
+        usePanes.getState().focusOrOpen('terminal')
+      }),
       ipc.menu.on('app:toggle-quick-ai', () => {
         const ui = useUI.getState()
         ui.setQuickAiOpen(!ui.quickAiOpen)

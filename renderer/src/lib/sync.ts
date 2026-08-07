@@ -147,6 +147,7 @@ const inflight = new Set<string>()
 const retryAttempts = new Map<string, number>()
 const PUSH_DEBOUNCE = 1500
 const RETRY_DELAYS = [3000, 10_000, 30_000, 60_000]
+const uploadIntervalDelay = (): number => Math.max(1, useSettings.getState().syncIntervalHours || 1) * 60 * 60 * 1000
 
 function scheduleFlush(vpath: string, delay = PUSH_DEBOUNCE): void {
   const current = timers.get(vpath)
@@ -161,14 +162,24 @@ export function pushDoc(localPath: string, doc: BijiDoc): void {
   if (!vpath) return
   useSync.getState().setNote(localPath, 'pending')
   pending.set(vpath, doc)
-  if (active()) scheduleFlush(vpath)
+  if (active()) scheduleFlush(vpath, uploadIntervalDelay())
+}
+
+// 设置变化时重排尚未上传的文档。0=暂停云同步；恢复后从新的间隔重新计时。
+export function configureSyncInterval(hours: number): void {
+  const enabled = hours > 0
+  useSync.getState().setEnabled(enabled)
+  for (const timer of timers.values()) clearTimeout(timer)
+  timers.clear()
+  if (!enabled || !active()) return
+  for (const vpath of pending.keys()) scheduleFlush(vpath, uploadIntervalDelay())
 }
 
 // 登出或临时断线期间保存的内容继续留在内存队列；重新登录后自动恢复上传。
 useAuth.subscribe((state, previous) => {
   if (state.status !== 'in' || previous.status === 'in') return
   knownOffline = false
-  for (const vpath of pending.keys()) if (!timers.has(vpath)) scheduleFlush(vpath, 100)
+  for (const vpath of pending.keys()) if (!timers.has(vpath)) scheduleFlush(vpath, uploadIntervalDelay())
 })
 
 function isSameOrChild(path: string, parent: string): boolean {
@@ -202,7 +213,7 @@ export async function relocateNode(oldLocalPath: string, newLocalPath: string): 
     clearTimeout(timer)
     timers.delete(path)
     const movedPath = newPath + path.slice(oldPath.length)
-    timers.set(movedPath, setTimeout(() => void flush(movedPath), PUSH_DEBOUNCE))
+    timers.set(movedPath, setTimeout(() => void flush(movedPath), uploadIntervalDelay()))
   }
   for (const [path, attempts] of [...retryAttempts]) {
     if (!isSameOrChild(path, oldPath)) continue
@@ -266,7 +277,7 @@ async function flush(vpath: string): Promise<void> {
   }
   if (inflight.has(vpath)) {
     // 上一次还在飞:稍后重排,保证最新内容最终送达
-    scheduleFlush(vpath)
+    scheduleFlush(vpath, PUSH_DEBOUNCE)
     return
   }
   const doc = pending.get(vpath)
@@ -294,7 +305,7 @@ async function flush(vpath: string): Promise<void> {
   } finally {
     inflight.delete(vpath)
     if (pending.has(vpath) && !timers.has(vpath)) {
-      scheduleFlush(vpath)
+      scheduleFlush(vpath, PUSH_DEBOUNCE)
     }
   }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ipc } from '@/lib/ipc'
 import { useUI, type HeadingNumberStyle } from '@/store/useUI'
-import { useSettings } from '@/store/useSettings'
+import { useSettings, type SyncIntervalHours, type TerminalColorScheme } from '@/store/useSettings'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useProviders } from '@/store/useProviders'
 import { toast } from '@/store/useToast'
@@ -61,6 +61,12 @@ function GeneralPane() {
   const setTheme = useSettings((s) => s.setTheme)
   const fontSize = useSettings((s) => s.fontSize)
   const setFontSize = useSettings((s) => s.setFontSize)
+  const terminalFontSize = useSettings((s) => s.terminalFontSize)
+  const setTerminalFontSize = useSettings((s) => s.setTerminalFontSize)
+  const terminalColorScheme = useSettings((s) => s.terminalColorScheme)
+  const setTerminalColorScheme = useSettings((s) => s.setTerminalColorScheme)
+  const syncIntervalHours = useSettings((s) => s.syncIntervalHours)
+  const setSyncIntervalHours = useSettings((s) => s.setSyncIntervalHours)
   const workspace = useSettings((s) => s.workspace)
   const setWorkspace = useSettings((s) => s.setWorkspace)
   const refresh = useWorkspace((s) => s.refresh)
@@ -99,6 +105,37 @@ function GeneralPane() {
       <div className="form-group">
         <label>编辑器字号</label>
         <input type="number" min={12} max={28} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value) || 16)} />
+      </div>
+      <div className="form-group">
+        <label>远程终端外观</label>
+        <div className="row gap">
+          <select value={terminalColorScheme} onChange={(e) => setTerminalColorScheme(e.target.value as TerminalColorScheme)}>
+            <option value="traditional">Traditional（黑底绿字）</option>
+            <option value="white-black">White / Black（白底黑字）</option>
+          </select>
+          <input
+            aria-label="终端字号"
+            title="终端字号"
+            style={{ width: 92 }}
+            type="number"
+            min={10}
+            max={36}
+            value={terminalFontSize}
+            onChange={(e) => setTerminalFontSize(Number(e.target.value) || 16)}
+          />
+        </div>
+        <small>配色和字号会立即应用到已经打开的远程会话。</small>
+      </div>
+      <div className="form-group">
+        <label>文档自动上传</label>
+        <select value={syncIntervalHours} onChange={(e) => setSyncIntervalHours(Number(e.target.value) as SyncIntervalHours)}>
+          <option value={0}>暂停自动上传</option>
+          <option value={1}>每 1 小时</option>
+          <option value={3}>每 3 小时</option>
+          <option value={5}>每 5 小时</option>
+          <option value={8}>每 8 小时</option>
+        </select>
+        <small>暂停只停止后台上传，不影响本地自动保存；可随时恢复或手动上传。</small>
       </div>
       <div className="form-group">
         <label>标题编号格式</label>
@@ -400,8 +437,8 @@ function AboutPane() {
         <li>✅ SSH(密码/私钥) + Telnet 远程终端</li>
         <li>✅ 全文搜索 · 跨平台</li>
       </ul>
-      <p>所有数据本地存储,不上传云端。</p>
-      <p>版本:0.2.0</p>
+      <p>笔记始终先保存在本地；登录后可按个人/团队权限同步到服务器。</p>
+      <p>版本号以应用顶栏显示为准。</p>
     </div>
   )
 }

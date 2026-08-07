@@ -3,6 +3,7 @@ import type { TreeNode } from '@/types'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useTabs } from '@/store/useTabs'
 import { usePanes } from '@/store/usePanes'
+import { useUI } from '@/store/useUI'
 import { useSettings } from '@/store/useSettings'
 import { ipc } from '@/lib/ipc'
 import { prompt } from '@/store/usePrompt'
@@ -156,6 +157,7 @@ function NodeView({ node, depth }: { node: TreeNode; depth: number }) {
     setActivePath(node.path)
     if (isDir) setExpanded(node.path, !open)
     else {
+      useUI.getState().setActivityView('library')
       openTab(node.path)
       usePanes.getState().focusOrOpen('editor')
     }
@@ -280,6 +282,7 @@ export function FileTree() {
           e.preventDefault()
           if (cur.node.type === 'dir') setExpanded(cur.node.path, !cur.open)
           else {
+            useUI.getState().setActivityView('library')
             openTab(cur.node.path)
             setActivePath(cur.node.path)
             usePanes.getState().focusOrOpen('editor')

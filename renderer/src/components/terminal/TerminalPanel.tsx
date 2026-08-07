@@ -6,9 +6,11 @@ import { ipc } from '@/lib/ipc'
 import { useSettings } from '@/store/useSettings'
 import { toast } from '@/store/useToast'
 import { confirm } from '@/store/useConfirm'
+import { prompt } from '@/store/usePrompt'
 import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
 import { usePanes } from '@/store/usePanes'
+import { useUI } from '@/store/useUI'
 import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
 import type { SSHHost, TelnetHost, SerialHost } from '@/types'
 import './terminal.css'
@@ -69,10 +71,10 @@ function readTerminalText(term: Terminal): string {
     .trim()
 }
 
-const xtermTheme = (theme: string) =>
-  theme === 'dark'
-    ? { background: '#1a1a1a', foreground: '#e6e6e6' }
-    : { background: '#ffffff', foreground: '#1f2329' }
+const xtermTheme = (scheme: 'traditional' | 'white-black') =>
+  scheme === 'traditional'
+    ? { background: '#050705', foreground: '#39ff5a', cursor: '#ffffff', cursorAccent: '#050705', selectionBackground: '#31583a' }
+    : { background: '#ffffff', foreground: '#111111', cursor: '#111111', cursorAccent: '#ffffff', selectionBackground: '#b8cff9' }
 
 // 按会话类型分派到对应 ipc(ssh/telnet/serial 三者的数据都通过 term:* 事件回传,故收数据共用 ipc.term.onData)
 type TKind = 'ssh' | 'telnet' | 'serial'
@@ -95,7 +97,7 @@ function termClose(kind: TKind, id: string) {
 // ============ 单个会话:独立 xterm + 连接 ============
 // 用 visibility 堆叠(非 display:none)隐藏非活动会话,使其容器仍有尺寸 → 后台标签也能正常
 // 初始化 xterm 并保持连接(display:none 会让 xterm 读不到 dimensions 而无法初始化/连接)。
-function TermSession({ tab, active, theme }: { tab: SessionTab; active: boolean; theme: string }) {
+function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; active: boolean; colorScheme: 'traditional' | 'white-black'; fontSize: number }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -160,9 +162,11 @@ function TermSession({ tab, active, theme }: { tab: SessionTab; active: boolean;
       if (term || host.clientWidth === 0 || host.clientHeight === 0) return
       term = new Terminal({
         fontFamily: 'Cascadia Code, Consolas, Menlo, monospace',
-        fontSize: 13,
+        fontSize,
         cursorBlink: true,
-        theme: xtermTheme(theme)
+        cursorStyle: 'block',
+        cursorInactiveStyle: 'outline',
+        theme: xtermTheme(colorScheme)
       })
       fit = new FitAddon()
       term.loadAddon(fit)
@@ -233,8 +237,11 @@ function TermSession({ tab, active, theme }: { tab: SessionTab; active: boolean;
   }, [])
 
   useEffect(() => {
-    if (termRef.current) termRef.current.options.theme = xtermTheme(theme)
-  }, [theme])
+    if (!termRef.current) return
+    termRef.current.options.theme = xtermTheme(colorScheme)
+    termRef.current.options.fontSize = fontSize
+    try { fitRef.current?.fit() } catch { /* ignore */ }
+  }, [colorScheme, fontSize])
 
   // 切到本会话:重新适配尺寸并聚焦(隐藏期间尺寸不变,但聚焦能直接打字)
   useEffect(() => {
@@ -295,6 +302,7 @@ function TermSession({ tab, active, theme }: { tab: SessionTab; active: boolean;
       return
     }
     window.dispatchEvent(new CustomEvent('biji:ask-ai', { detail: { text, source: tab.name } }))
+    useUI.getState().setActivityView('ai')
     usePanes.getState().focusOrOpen('ai')
   }
 
@@ -324,7 +332,7 @@ function TermSession({ tab, active, theme }: { tab: SessionTab; active: boolean;
           {logging ? '停止记录' : '记录'}
         </button>
       </div>
-      <div className="term-host" ref={hostRef} />
+      <div className="term-host" ref={hostRef} style={{ background: xtermTheme(colorScheme).background }} />
 
       {pasteText !== null && (
         <div className="modal-backdrop-full" onClick={() => setPasteText(null)}>
@@ -369,10 +377,9 @@ interface TreeFolder {
   hosts: HostLeaf[]
 }
 
-function buildTree(leaves: HostLeaf[]): TreeFolder {
+function buildTree(leaves: HostLeaf[], savedFolders: string[] = []): TreeFolder {
   const root: TreeFolder = { name: '', path: '', folders: [], hosts: [] }
-  for (const leaf of leaves) {
-    const parts = (leaf.group || '').split('/').map((s) => s.trim()).filter(Boolean)
+  const ensureParts = (parts: string[]): TreeFolder => {
     let cur = root
     for (const part of parts) {
       let next = cur.folders.find((f) => f.name === part)
@@ -382,6 +389,12 @@ function buildTree(leaves: HostLeaf[]): TreeFolder {
       }
       cur = next
     }
+    return cur
+  }
+  for (const folder of savedFolders) ensureParts(folder.split('/').map((s) => s.trim()).filter(Boolean))
+  for (const leaf of leaves) {
+    const parts = (leaf.group || '').split('/').map((s) => s.trim()).filter(Boolean)
+    const cur = ensureParts(parts)
     cur.hosts.push(leaf)
   }
   const sort = (f: TreeFolder) => {
@@ -491,6 +504,8 @@ function SessionManager({
   onDelete,
   onRefresh,
   onImport,
+  onImportFolder,
+  onCreateFolder,
   onExport
 }: {
   leaves: HostLeaf[]
@@ -499,8 +514,11 @@ function SessionManager({
   onDelete: (h: HostLeaf) => void
   onRefresh: () => void
   onImport: () => void
+  onImportFolder: () => void
+  onCreateFolder: () => void
   onExport: () => void
 }) {
+  const folders = useSettings((s) => s.terminalFolders)
   const [filter, setFilter] = useState('')
   const [spin, setSpin] = useState(false)
   const doRefresh = () => {
@@ -508,7 +526,7 @@ function SessionManager({
     onRefresh()
     window.setTimeout(() => setSpin(false), 600) // 至少转一圈
   }
-  const tree = useMemo(() => buildTree(leaves), [leaves])
+  const tree = useMemo(() => buildTree(leaves, folders), [leaves, folders])
   // 默认展开全部文件夹
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   useEffect(() => {
@@ -530,8 +548,14 @@ function SessionManager({
     <div className="term-manager">
       <div className="sm-head">
         <span className="sm-title">会话管理器</span>
+        <button className="icon-btn small" title="新建客户文件夹" onClick={onCreateFolder}>
+          <Icon name="folder-plus" size={14} />
+        </button>
         <button className="icon-btn small" title="导入 SecureCRT / MobaXterm / 墨启会话" onClick={onImport}>
           <Icon name="file-plus" size={14} />
+        </button>
+        <button className="icon-btn small" title="导入整个会话文件夹并保留目录结构" onClick={onImportFolder}>
+          <Icon name="folder-open" size={14} />
         </button>
         <button className="icon-btn small" title="导出墨启会话（不包含密码）" onClick={onExport}>
           <Icon name="download" size={14} />
@@ -550,7 +574,7 @@ function SessionManager({
         )}
       </div>
       <div className="sm-tree">
-        {leaves.length === 0 ? (
+        {leaves.length === 0 && folders.length === 0 ? (
           <div className="sm-empty">尚未配置主机。请在「设置 → SSH/Telnet 主机」中添加(可填分组构建文件夹)。</div>
         ) : q ? (
           matched.length === 0 ? (
@@ -603,7 +627,10 @@ function SessionManager({
 
 // ============ 终端面板:会话管理器 + 多会话标签 ============
 export function TerminalPanel() {
-  const theme = useSettings((s) => s.theme)
+  const terminalFontSize = useSettings((s) => s.terminalFontSize)
+  const terminalColorScheme = useSettings((s) => s.terminalColorScheme)
+  const terminalFolders = useSettings((s) => s.terminalFolders)
+  const setTerminalFolders = useSettings((s) => s.setTerminalFolders)
   const [leaves, setLeaves] = useState<HostLeaf[]>([])
   const [tabs, setTabs] = useState<SessionTab[]>([])
   const [activeKey, setActiveKey] = useState('')
@@ -646,11 +673,23 @@ export function TerminalPanel() {
     return () => window.removeEventListener('biji:terminal-hosts-changed', loadHosts)
   }, [])
 
-  const importSessions = async () => {
-    const paths = await ipc.sys.chooseSessionFiles()
+  const importPaths = async (paths: string[], root?: string) => {
     if (!paths.length) return
     try {
-      const imported = await Promise.all(paths.map(async (sourcePath) => importSessionText(sourcePath, String(await ipc.sys.readFile(sourcePath)))))
+      const imported = await Promise.all(paths.map(async (sourcePath) => {
+        const batch = await importSessionText(sourcePath, String(await ipc.sys.readFile(sourcePath)))
+        if (!root) return batch
+        const normalizedRoot = root.replace(/\\/g, '/').replace(/\/$/, '')
+        const relativePath = sourcePath.replace(/\\/g, '/').slice(normalizedRoot.length).replace(/^\//, '')
+        const parts = relativePath.split('/')
+        parts.pop()
+        const prefix = [normalizedRoot.split('/').pop() || '导入会话', ...parts].filter(Boolean).join('/')
+        const mergeGroup = (group?: string) => [prefix, group && !/^(SecureCRT|MobaXterm)$/i.test(group) ? group : ''].filter(Boolean).join('/')
+        return {
+          ssh: batch.ssh.map((host) => ({ ...host, group: mergeGroup(host.group) })),
+          telnet: batch.telnet.map((host) => ({ ...host, group: mergeGroup(host.group) }))
+        }
+      }))
       const [currentSSH, currentTelnet] = await Promise.all([
         ipc.settings.get('sshHosts') as Promise<any[]>,
         ipc.settings.get('telnetHosts') as Promise<TelnetHost[]>
@@ -676,6 +715,20 @@ export function TerminalPanel() {
     } catch (error) {
       toast(`会话导入失败：${(error as Error).message}`, 'error')
     }
+  }
+
+  const importSessions = async () => importPaths(await ipc.sys.chooseSessionFiles())
+  const importSessionFolder = async () => {
+    const selected = await ipc.sys.chooseSessionFolder()
+    if (!selected) return
+    await importPaths(selected.files, selected.root)
+  }
+
+  const createFolder = async () => {
+    const value = await prompt('新建会话文件夹', '客户名称')
+    if (value === null || !value.trim()) return
+    await setTerminalFolders([...terminalFolders, value])
+    toast('会话文件夹已创建；编辑会话时可将它放入该分组', 'success')
   }
 
   const exportSessions = async () => {
@@ -792,6 +845,8 @@ export function TerminalPanel() {
             onDelete={(leaf) => void deleteHost(leaf)}
             onRefresh={loadHosts}
             onImport={() => void importSessions()}
+            onImportFolder={() => void importSessionFolder()}
+            onCreateFolder={() => void createFolder()}
             onExport={() => void exportSessions()}
           />
         )}
@@ -833,7 +888,15 @@ export function TerminalPanel() {
                 从左侧「会话管理器」双击主机即可连接。可同时连接多台设备，每台一个标签页；Ctrl+Tab 切换。
               </div>
             ) : (
-              tabs.map((t) => <TermSession key={t.key} tab={t} active={t.key === activeKey} theme={theme} />)
+              tabs.map((t) => (
+                <TermSession
+                  key={t.key}
+                  tab={t}
+                  active={t.key === activeKey}
+                  colorScheme={terminalColorScheme}
+                  fontSize={terminalFontSize}
+                />
+              ))
             )}
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { useTabs } from '@/store/useTabs'
 import { useWorkspace } from '@/store/useWorkspace'
 import { usePanes } from '@/store/usePanes'
+import { useUI } from '@/store/useUI'
 import { Icon } from '@/components/common/Icon'
 
 export function Tabs() {
@@ -14,6 +15,7 @@ export function Tabs() {
   if (!tabs.length) return null
 
   const onActivate = (path: string) => {
+    useUI.getState().setActivityView('library')
     setActive(path)
     setActivePath(path)
     focusOrOpen('editor')
