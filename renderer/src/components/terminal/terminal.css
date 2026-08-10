@@ -224,10 +224,11 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.sm-team-tag { margin-left: 6px; padding: 1px 5px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 10px; }
 .sm-host[draggable="true"] { cursor: grab; }
 .sm-host[draggable="true"]:active { cursor: grabbing; opacity: 0.72; }
 .sm-folder:has(+ *) { transition: background 100ms ease; }
-.sm-host-delete {
+.sm-host-delete, .sm-host-share, .sm-host-manage {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -243,8 +244,19 @@
   opacity: 0;
 }
 .sm-host:hover .sm-host-delete,
-.sm-host:focus-within .sm-host-delete { opacity: 1; }
+.sm-host:focus-within .sm-host-delete,
+.sm-host:hover .sm-host-share,
+.sm-host:focus-within .sm-host-share,
+.sm-host:hover .sm-host-manage,
+.sm-host:focus-within .sm-host-manage { opacity: 1; }
 .sm-host-delete:hover { color: #e5484d; background: color-mix(in srgb, #e5484d 10%, transparent); }
+.sm-host-share:hover { color: var(--accent); background: var(--accent-soft); }
+.sm-host-manage:hover { color: var(--accent); background: var(--accent-soft); }
+
+.session-permissions-card { width: min(650px, 92vw); max-height: 82vh; overflow: hidden; }
+.session-security-note { display: flex; align-items: center; gap: 8px; margin: 14px 18px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, #22a06b 26%, var(--border)); border-radius: 8px; color: var(--text-secondary); background: color-mix(in srgb, #22a06b 7%, var(--bg)); font-size: 12px; line-height: 1.5; }
+.session-security-note svg { flex: none; color: #22a06b; }
+.session-permission-actions { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; }
 .qc-save-option {
   display: inline-flex;
   align-items: center;

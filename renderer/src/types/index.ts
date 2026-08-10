@@ -41,6 +41,7 @@ export interface AIProvider {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  sources?: Array<{ path: string; title: string; excerpt: string; updatedAt: string }>
 }
 
 export interface SSHHost {

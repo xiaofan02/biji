@@ -9,6 +9,7 @@ import { authRouter } from './auth'
 import { treeRouter } from './tree'
 import { assetsRouter } from './assets'
 import { hocuspocus } from './hocuspocus'
+import { sessionsRouter } from './sessions'
 import { asyncHandler, errorHandler } from './http'
 
 async function main(): Promise<void> {
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   // assets 必须挂在 tree 之前:GET /api/assets/:id 是公开的,命中后即响应、不会落到 tree 路由级的鉴权;
   // 而 tree 挂载点 /api 上的 authMiddleware 会拦截所有未匹配请求,顺序反了会误伤公开图片读取。
   app.use('/api', assetsRouter) // 图片:POST 需登录、GET 公开
+  app.use('/api/sessions', sessionsRouter)
   app.use('/api', treeRouter) // 文档树 CRUD(路由内部已统一 authMiddleware)
 
   app.use(errorHandler)

@@ -14,6 +14,8 @@ import { usePanes } from '@/store/usePanes'
 import { useTabs } from '@/store/useTabs'
 import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
 import type { SSHHost, TelnetHost, SerialHost } from '@/types'
+import { api, type SharedRemoteSession } from '@/lib/api'
+import { useAuth } from '@/store/useAuth'
 import './terminal.css'
 
 // 一个终端会话标签:每个标签 = 一台设备的独立连接(独立 xterm + 独立后端 session id),互不影响。
@@ -27,7 +29,7 @@ interface SessionTab {
 }
 
 let _seq = 1
-const terminalPasteTargets = new Map<string, (text: string) => void>()
+const terminalPasteTargets = new Map<string, (text: string, execute?: boolean) => boolean>()
 
 // 去掉 ANSI 转义/控制序列，得到适合存档的纯文本会话记录。
 // 重点处理设备分页提示 "--More--"：翻页时设备会发退格(\b)+空格来擦除该提示，
@@ -110,7 +112,20 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
   const [pasteText, setPasteText] = useState<string | null>(null)
 
   useEffect(() => {
-    terminalPasteTargets.set(tab.key, (text) => setPasteText(text))
+    terminalPasteTargets.set(tab.key, (text, execute = false) => {
+      if (!execute) {
+        setPasteText(text)
+        return true
+      }
+      const session = sessionRef.current
+      if (!session) {
+        toast('当前终端尚未连接，无法执行命令', 'error')
+        return false
+      }
+      const command = text.trim().replace(/\r?\n/g, '\r')
+      if (command) termWrite(session.kind, session.id, command + '\r')
+      return !!command
+    })
     return () => { terminalPasteTargets.delete(tab.key) }
   }, [tab.key])
 
@@ -278,6 +293,10 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
     const base = tab.name.replace(/[\\/:*?"<>|]/g, '_')
     const saved = (await ipc.log.start(s.id, `${base}-${logStamp()}.log`)) as string | null
     if (saved) {
+      const source = tab.kind === 'serial'
+        ? `${tab.cfg.path}@${tab.cfg.baudRate}`
+        : `${tab.cfg.username ? `${tab.cfg.username}@` : ''}${tab.cfg.host}:${tab.cfg.port}`
+      ipc.log.append(s.id, `[墨启终端记录]\n时间：${new Date().toLocaleString('zh-CN', { hour12: false })}\n协议：${tab.kind.toUpperCase()}\n设备：${source}\n${'-'.repeat(56)}\n`)
       loggingRef.current = true
       setLogging(true)
       toast('开始记录会话到本地文件', 'success')
@@ -323,9 +342,16 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
       return toast('请先打开一篇笔记，再保存终端内容', 'error')
     }
     const safe = text.replace(/```/g, '``\\`')
+    const savedAt = new Date().toLocaleString('zh-CN', { hour12: false })
+    const source = tab.kind === 'serial'
+      ? `${tab.cfg.path}@${tab.cfg.baudRate}`
+      : `${tab.cfg.username ? `${tab.cfg.username}@` : ''}${tab.cfg.host}:${tab.cfg.port}`
     window.dispatchEvent(new CustomEvent('biji:save-to-note', {
-      detail: { markdown: `## 终端记录：${tab.name}\n\n\`\`\`shell\n${safe}\n\`\`\`` }
+      detail: {
+        markdown: `## 终端记录：${tab.name}\n\n> 时间：${savedAt}　协议：${tab.kind.toUpperCase()}　设备：${source}\n\n\`\`\`shell\n${safe}\n\`\`\``
+      }
     }))
+    toast('终端输出已存入当前笔记，并附带设备与时间信息', 'success')
   }
 
   return (
@@ -394,6 +420,7 @@ interface HostLeaf {
   host: SSHHost | TelnetHost | SerialHost
   name: string
   group: string
+  shared?: SharedRemoteSession
 }
 interface TreeFolder {
   name: string
@@ -456,7 +483,9 @@ function FolderNode({
   connected,
   onConnect,
   onDelete,
-  onMove
+  onMove,
+  onShare,
+  onManageShare
 }: {
   folder: TreeFolder
   depth: number
@@ -466,6 +495,8 @@ function FolderNode({
   onConnect: (h: HostLeaf) => void
   onDelete: (h: HostLeaf) => void
   onMove: (h: HostLeaf, group: string) => void
+  onShare: (h: HostLeaf) => void
+  onManageShare: (h: HostLeaf) => void
 }) {
   return (
     <>
@@ -510,6 +541,8 @@ function FolderNode({
                 onConnect={onConnect}
                 onDelete={onDelete}
                 onMove={onMove}
+                onShare={onShare}
+                onManageShare={onManageShare}
               />
             )}
           </div>
@@ -533,9 +566,11 @@ function FolderNode({
           <span className="sm-icon">
             <Icon name="terminal" size={13} />
           </span>
-          <span className="sm-label">{h.name || hostAddr(h)}</span>
+          <span className="sm-label">{h.name || hostAddr(h)}{h.shared && <span className="sm-team-tag">团队</span>}</span>
           {connected.has(h.id) && <span className="sm-conn-dot" title="已有连接" />}
-          <button
+          {!h.shared && h.kind !== 'serial' && <button className="sm-host-share" title="共享给团队（不包含密码和私钥）" onClick={(event) => { event.stopPropagation(); onShare(h) }}><Icon name="users" size={13} /></button>}
+          {h.shared?.canManage && <button className="sm-host-manage" title="管理共享成员和权限" onClick={(event) => { event.stopPropagation(); onManageShare(h) }}><Icon name="users" size={13} /></button>}
+          {(!h.shared || h.shared.canManage) && <button
             className="sm-host-delete"
             title="删除已保存会话"
             onClick={(event) => {
@@ -544,7 +579,7 @@ function FolderNode({
             }}
           >
             <Icon name="trash" size={13} />
-          </button>
+          </button>}
         </div>
       ))}
     </>
@@ -561,7 +596,9 @@ function SessionManager({
   onImportFolder,
   onCreateFolder,
   onMove,
-  onExport
+  onExport,
+  onShare,
+  onManageShare
 }: {
   leaves: HostLeaf[]
   connected: Set<string>
@@ -573,6 +610,8 @@ function SessionManager({
   onCreateFolder: () => void
   onMove: (h: HostLeaf, group: string) => void
   onExport: () => void
+  onShare: (h: HostLeaf) => void
+  onManageShare: (h: HostLeaf) => void
 }) {
   const folders = useSettings((s) => s.terminalFolders)
   const [filter, setFilter] = useState('')
@@ -669,11 +708,13 @@ function SessionManager({
                   <Icon name="terminal" size={13} />
                 </span>
                 <span className="sm-label">
-                  {h.name || hostAddr(h)}
+                  {h.name || hostAddr(h)}{h.shared && <span className="sm-team-tag">团队</span>}
                   {h.group && <span className="sm-host-group"> · {h.group}</span>}
                 </span>
                 {connected.has(h.id) && <span className="sm-conn-dot" />}
-                <button
+                {!h.shared && h.kind !== 'serial' && <button className="sm-host-share" title="共享给团队" onClick={(event) => { event.stopPropagation(); onShare(h) }}><Icon name="users" size={13} /></button>}
+                {h.shared?.canManage && <button className="sm-host-manage" title="管理共享成员和权限" onClick={(event) => { event.stopPropagation(); onManageShare(h) }}><Icon name="users" size={13} /></button>}
+                {(!h.shared || h.shared.canManage) && <button
                   className="sm-host-delete"
                   title="删除已保存会话"
                   onClick={(event) => {
@@ -682,7 +723,7 @@ function SessionManager({
                   }}
                 >
                   <Icon name="trash" size={13} />
-                </button>
+                </button>}
               </div>
             ))
           )
@@ -696,6 +737,8 @@ function SessionManager({
             onConnect={onConnect}
             onDelete={onDelete}
             onMove={onMove}
+            onShare={onShare}
+            onManageShare={onManageShare}
           />
         )}
       </div>
@@ -720,8 +763,9 @@ export function TerminalPanel() {
     Promise.all([
       ipc.settings.get('sshHosts') as Promise<any[]>,
       ipc.settings.get('telnetHosts') as Promise<TelnetHost[]>,
-      ipc.settings.get('serialHosts') as Promise<SerialHost[]>
-    ]).then(([ssh, telnet, serial]) => {
+      ipc.settings.get('serialHosts') as Promise<SerialHost[]>,
+      useAuth.getState().status === 'in' ? api.remoteSessions().catch(() => []) : Promise.resolve([] as SharedRemoteSession[])
+    ]).then(([ssh, telnet, serial, shared]) => {
       const next: HostLeaf[] = [
         ...((ssh as any[]) || []).map((raw) => {
           const h = normalizeSSHHost(raw)
@@ -740,7 +784,17 @@ export function TerminalPanel() {
           host: h,
           name: h.name,
           group: h.group || ''
-        }))
+        })),
+        ...shared.map((session) => ({
+          id: `shared:${session.id}`,
+          kind: session.kind,
+          host: session.kind === 'ssh'
+            ? { id: session.id, name: session.name, host: session.host, port: session.port, username: session.username, auth: 'password' as const, password: '', group: session.folder }
+            : { id: session.id, name: session.name, host: session.host, port: session.port, group: session.folder },
+          name: session.name,
+          group: session.folder || '',
+          shared: session
+        } as HostLeaf))
       ]
       setLeaves(next)
     })
@@ -750,17 +804,22 @@ export function TerminalPanel() {
     window.addEventListener('biji:terminal-hosts-changed', loadHosts)
     return () => window.removeEventListener('biji:terminal-hosts-changed', loadHosts)
   }, [])
+  useEffect(() => useAuth.subscribe((state, previous) => {
+    if (state.status !== previous.status) loadHosts()
+  }), [])
 
   useEffect(() => {
     const send = (event: Event) => {
-      const text = String((event as CustomEvent<{ text?: string }>).detail?.text || '')
+      const detail = (event as CustomEvent<{ text?: string; execute?: boolean }>).detail
+      const text = String(detail?.text || '')
       if (!text) return
       if (!activeKey) return toast('请先打开一个终端会话', 'error')
       const target = terminalPasteTargets.get(activeKey)
       if (!target) return toast('当前终端还没有准备好', 'error')
       useUI.getState().setActivityView('terminal')
       usePanes.getState().focusOrOpen('terminal')
-      target(text)
+      const accepted = target(text, detail?.execute === true)
+      if (accepted && detail?.execute) toast('命令已发送到当前终端执行', 'success')
     }
     window.addEventListener('biji:send-to-terminal', send)
     return () => window.removeEventListener('biji:send-to-terminal', send)
@@ -835,15 +894,21 @@ export function TerminalPanel() {
   }
 
   // 「连接」= 为该主机新开一个会话标签(同一台设备也可开多个),不影响已有会话
-  const connectHost = (leaf: HostLeaf) => {
+  const connectHost = async (leaf: HostLeaf) => {
     let cfg: any
     if (leaf.kind === 'ssh') {
       const h = leaf.host as SSHHost
+      let sharedPassword = ''
+      if (leaf.shared) {
+        const entered = await prompt(`连接 ${h.username ? `${h.username}@` : ''}${h.host}`, '请输入你自己的登录密码（不会保存或上传）')
+        if (entered === null) return
+        sharedPassword = entered
+      }
       cfg = {
         host: h.host,
         port: h.port,
         username: h.username,
-        password: h.auth === 'password' ? h.password : undefined,
+        password: leaf.shared ? sharedPassword : h.auth === 'password' ? h.password : undefined,
         privateKeyPath: h.auth === 'key' ? h.privateKeyPath : undefined,
         passphrase: h.auth === 'key' ? h.passphrase : undefined
       }
@@ -859,6 +924,39 @@ export function TerminalPanel() {
     setActiveKey(key)
   }
 
+  const shareHost = async (leaf: HostLeaf) => {
+    if (useAuth.getState().status !== 'in') return toast('请先登录后再共享会话', 'error')
+    if (leaf.kind === 'serial' || leaf.shared) return
+    const accepted = await confirm({
+      title: '共享远程会话',
+      message: `把“${leaf.name}”共享给团队？只同步地址、端口、协议、用户名和文件夹，不上传密码或私钥。`,
+      confirmText: '共享给团队'
+    })
+    if (!accepted) return
+    const host = leaf.host as SSHHost | TelnetHost
+    try {
+      const shared = await api.createRemoteSession({
+        kind: leaf.kind,
+        name: leaf.name,
+        host: host.host,
+        port: host.port,
+        username: leaf.kind === 'ssh' ? (host as SSHHost).username : '',
+        folder: leaf.group,
+        visibility: 'team'
+      })
+      loadHosts()
+      toast('会话已创建共享，请选择可访问的团队成员', 'success')
+      window.dispatchEvent(new CustomEvent('moqi:open-session-permissions', { detail: shared }))
+    } catch (error) {
+      toast('共享失败：' + (error as Error).message, 'error')
+    }
+  }
+
+  const manageSharedHost = (leaf: HostLeaf) => {
+    if (!leaf.shared?.canManage) return toast('只有会话创建者或管理员可以管理共享权限', 'error')
+    window.dispatchEvent(new CustomEvent('moqi:open-session-permissions', { detail: leaf.shared }))
+  }
+
   const deleteHost = async (leaf: HostLeaf) => {
     const accepted = await confirm({
       title: '删除已保存会话',
@@ -867,6 +965,13 @@ export function TerminalPanel() {
       danger: true
     })
     if (!accepted) return
+    if (leaf.shared) {
+      if (!leaf.shared.canManage) return toast('只有会话创建者或管理员可以停止共享', 'error')
+      await api.removeRemoteSession(leaf.shared.id)
+      loadHosts()
+      toast('已删除团队共享会话', 'success')
+      return
+    }
     const key = leaf.kind === 'ssh' ? 'sshHosts' : leaf.kind === 'telnet' ? 'telnetHosts' : 'serialHosts'
     const list = (((await ipc.settings.get(key)) as Array<{ id?: string }>) || []).filter((item) => item.id !== leaf.host.id)
     await ipc.settings.set(key, list)
@@ -877,6 +982,13 @@ export function TerminalPanel() {
 
   const moveSavedHost = async (leaf: HostLeaf, group: string) => {
     if ((leaf.group || '') === group) return
+    if (leaf.shared) {
+      if (leaf.shared.accessLevel !== 'edit') return toast('你只有使用权限，不能移动该团队会话', 'error')
+      await api.updateRemoteSession(leaf.shared.id, { folder: group })
+      loadHosts()
+      toast(group ? `团队会话已移动到「${group}」` : '团队会话已移动到根目录', 'success')
+      return
+    }
     const key = leaf.kind === 'ssh' ? 'sshHosts' : leaf.kind === 'telnet' ? 'telnetHosts' : 'serialHosts'
     const list = (((await ipc.settings.get(key)) as Array<{ id?: string; group?: string }>) || []).map((item) =>
       item.id === leaf.host.id ? { ...item, group } : item
@@ -946,7 +1058,7 @@ export function TerminalPanel() {
           <SessionManager
             leaves={leaves}
             connected={connected}
-            onConnect={connectHost}
+            onConnect={(leaf) => void connectHost(leaf)}
             onDelete={(leaf) => void deleteHost(leaf)}
             onRefresh={loadHosts}
             onImport={() => void importSessions()}
@@ -954,6 +1066,8 @@ export function TerminalPanel() {
             onCreateFolder={() => void createFolder()}
             onMove={(leaf, group) => void moveSavedHost(leaf, group)}
             onExport={() => void exportSessions()}
+            onShare={(leaf) => void shareHost(leaf)}
+            onManageShare={manageSharedHost}
           />
         )}
         <div className="term-main">

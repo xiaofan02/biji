@@ -77,6 +77,30 @@ CREATE TABLE IF NOT EXISTS node_permissions (
   PRIMARY KEY (node_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_node_permissions_user ON node_permissions(user_id, node_id);
+
+CREATE TABLE IF NOT EXISTS remote_sessions (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL CHECK (kind IN ('ssh', 'telnet')),
+  name        TEXT NOT NULL,
+  host        TEXT NOT NULL,
+  port        INTEGER NOT NULL,
+  username    TEXT NOT NULL DEFAULT '',
+  folder      TEXT NOT NULL DEFAULT '',
+  visibility  TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'team')),
+  team_access TEXT NOT NULL DEFAULT 'all' CHECK (team_access IN ('all', 'restricted')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_remote_sessions_owner ON remote_sessions(owner_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS remote_session_permissions (
+  session_id UUID NOT NULL REFERENCES remote_sessions(id) ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK (permission IN ('use', 'edit')),
+  PRIMARY KEY (session_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_remote_session_permissions_user ON remote_session_permissions(user_id, session_id);
 `
 
 export async function migrate(): Promise<void> {

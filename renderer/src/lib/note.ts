@@ -114,7 +114,7 @@ function tableCellText(cell: any): string {
 // 旧版本曾把 Excel 导入为普通富文本表格。加载时升级成工作表块，
 // 让已有文档也能获得行号、列标、选区和键盘导航；首次保存后即持久化新格式。
 function upgradeLegacyTables(blocks: any[]): any[] {
-  return blocks.map((block) => {
+  const upgraded = blocks.map((block) => {
     if (block?.type === 'table' && Array.isArray(block?.content?.rows)) {
       const data = block.content.rows.map((row: any) =>
         Array.isArray(row?.cells) ? row.cells.map(tableCellText) : []
@@ -131,6 +131,39 @@ function upgradeLegacyTables(blocks: any[]): any[] {
       children: Array.isArray(block?.children) ? upgradeLegacyTables(block.children) : block?.children
     }
   })
+
+  // v0.5.0 的 Excel 导入会把每个工作表写成相邻的独立块。升级后将这些相邻旧块
+  // 自动合并成一个工作簿，原有数据、列宽和样式都进入底部工作表标签页。
+  const result: any[] = []
+  for (let index = 0; index < upgraded.length;) {
+    const current = upgraded[index]
+    if (current?.type !== 'spreadsheet' || current?.props?.sheets) {
+      result.push(current)
+      index++
+      continue
+    }
+    const group: any[] = []
+    while (index < upgraded.length && upgraded[index]?.type === 'spreadsheet' && !upgraded[index]?.props?.sheets) {
+      group.push(upgraded[index++])
+    }
+    if (group.length === 1) {
+      result.push(group[0])
+      continue
+    }
+    const sheets = group.map((sheet, sheetIndex) => ({
+      id: `${sheet.id || 'legacy'}-${sheetIndex + 1}`,
+      name: sheet.props?.name || `Sheet${sheetIndex + 1}`,
+      data: sheet.props?.data || '[[""]]',
+      styles: sheet.props?.styles || '{}',
+      columnWidths: sheet.props?.columnWidths || '[]',
+      frozenRows: Number(sheet.props?.frozenRows || 0)
+    }))
+    result.push({
+      ...group[0],
+      props: { ...group[0].props, sheets: JSON.stringify(sheets), activeSheet: 0 }
+    })
+  }
+  return result
 }
 
 // 显示用:相对 assets/.. → 笔记目录下的绝对 file://;外链/已是绝对地址的原样保留。

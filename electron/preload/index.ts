@@ -128,6 +128,8 @@ const api = {
   exporter: {
     saveText: (defaultName: string, content: string, filters: { name: string; extensions: string[] }[]) =>
       ipcRenderer.invoke('export:save-text', defaultName, content, filters),
+    saveBinary: (defaultName: string, data: Uint8Array, filters: { name: string; extensions: string[] }[]) =>
+      ipcRenderer.invoke('export:save-binary', defaultName, data, filters),
     pdf: (defaultName: string, html: string) => ipcRenderer.invoke('export:pdf', defaultName, html)
   }
 }

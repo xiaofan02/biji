@@ -8,6 +8,10 @@ import { activeContent } from '@/lib/activeContent'
 import { toast } from '@/store/useToast'
 import { Icon } from '@/components/common/Icon'
 import type { ChatMessage } from '@/types'
+import { api, type KnowledgeSource } from '@/lib/api'
+import { useAuth } from '@/store/useAuth'
+import { pullAll, virtualToLocal } from '@/lib/sync'
+import { useWorkspace } from '@/store/useWorkspace'
 import './ai.css'
 
 interface Msg extends ChatMessage {
@@ -39,10 +43,12 @@ export function AIChat() {
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [useContext, setUseContext] = useState(true)
+  const [useKnowledge, setUseKnowledge] = useState(true)
   const [stream, setStream] = useState(true)
   const [busy, setBusy] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
+  const loggedIn = useAuth((s) => s.status === 'in')
   const convIdRef = useRef<string>(crypto.randomUUID()) // 当前会话 id
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -64,7 +70,7 @@ export function AIChat() {
       upsertConv({
         id: convIdRef.current,
         title: titleFromMessages(real),
-        messages: real.map((m) => ({ role: m.role, content: m.content })),
+        messages: real.map((m) => ({ role: m.role, content: m.content, sources: m.sources })),
         createdAt: existing?.createdAt || now,
         updatedAt: now
       })
@@ -86,6 +92,7 @@ export function AIChat() {
 
     const history = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, content: m.content }))
     const apiMessages: ChatMessage[] = []
+    let knowledgeSources: KnowledgeSource[] = []
     if (useContext) {
       const ctx = activeContent.get().text
       if (ctx && ctx.trim()) {
@@ -101,9 +108,25 @@ export function AIChat() {
         content: `以下是用户从终端「${termCtx.source}」选取的内容(命令/输出/报错):\n\n\`\`\`\n${termCtx.text.slice(0, 12000)}\n\`\`\``
       })
     }
+    if (useKnowledge && loggedIn) {
+      try {
+        knowledgeSources = await api.knowledgeSearch(text, 6)
+        if (knowledgeSources.length) {
+          const context = knowledgeSources.map((source, index) =>
+            `[来源${index + 1}] ${source.title}\n路径：${source.path}\n${source.excerpt}`
+          ).join('\n\n---\n\n')
+          apiMessages.push({
+            role: 'system',
+            content: `以下内容来自当前用户有权查看的企业团队知识库。请优先依据这些资料回答；涉及资料中的事实时使用 [来源1] 这样的标记引用。资料不足时明确说明，不要编造。\n\n${context}`
+          })
+        }
+      } catch (error) {
+        toast('企业知识库检索失败，已继续使用普通 AI：' + (error as Error).message, 'error')
+      }
+    }
     apiMessages.push(...history, { role: 'user', content: text })
 
-    setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }])
+    setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true, sources: knowledgeSources }])
     setBusy(true)
 
     const reqId = crypto.randomUUID()
@@ -196,6 +219,16 @@ export function AIChat() {
     window.dispatchEvent(new CustomEvent('biji:save-to-note', { detail: { markdown: content } }))
   }
 
+  const openKnowledgeSource = async (source: KnowledgeSource) => {
+    try {
+      await pullAll()
+      await useWorkspace.getState().refresh()
+      useTabs.getState().open(virtualToLocal(source.path))
+    } catch (error) {
+      toast('打开知识来源失败：' + (error as Error).message, 'error')
+    }
+  }
+
   const q = historyQuery.trim().toLowerCase()
   const filtered = q
     ? convList.filter(
@@ -285,6 +318,16 @@ export function AIChat() {
                   {m.content}
                   {m.streaming && <span className="ai-caret">▋</span>}
                 </div>
+                {m.role === 'assistant' && m.sources && m.sources.length > 0 && (
+                  <div className="ai-knowledge-sources">
+                    <span>知识来源</span>
+                    {m.sources.map((source, sourceIndex) => (
+                      <button key={source.path} type="button" onClick={() => void openKnowledgeSource(source)} title={source.path}>
+                        [{sourceIndex + 1}] {source.title}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -292,6 +335,9 @@ export function AIChat() {
           <div className="ai-context-bar">
             <label>
               <input type="checkbox" checked={useContext} onChange={(e) => setUseContext(e.target.checked)} /> 包含当前笔记
+            </label>
+            <label title={loggedIn ? '仅检索你有权查看的团队文档，并显示回答来源' : '登录后可使用企业知识库'}>
+              <input type="checkbox" checked={useKnowledge && loggedIn} disabled={!loggedIn} onChange={(e) => setUseKnowledge(e.target.checked)} /> 企业知识库
             </label>
             <label>
               <input type="checkbox" checked={stream} onChange={(e) => setStream(e.target.checked)} /> 流式

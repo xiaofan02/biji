@@ -16,6 +16,7 @@
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
+  overflow-x: auto;
 }
 
 .moqi-sheet-name {
@@ -41,6 +42,12 @@
   cursor: pointer;
 }
 .moqi-sheet-toolbar button:hover { color: var(--accent); border-color: var(--accent); }
+.moqi-sheet-toolbar input[type='color'] { width: 29px; height: 29px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); }
+.moqi-formula-bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--bg-primary); }
+.moqi-formula-bar > span { color: var(--accent); font: italic 600 13px Georgia, serif; }
+.moqi-formula-bar input { flex: 1; min-width: 100px; height: 27px; border: 1px solid transparent; border-radius: 5px; padding: 0 7px; color: var(--text-primary); background: var(--bg-secondary); outline: none; }
+.moqi-formula-bar input:focus { border-color: var(--accent); }
+.moqi-formula-bar .moqi-sheet-filter { flex: 0 0 150px; }
 
 .moqi-sheet-scroll { max-height: 520px; overflow: auto; outline: none; }
 .moqi-sheet-scroll table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: max-content; min-width: 100%; }
@@ -53,6 +60,67 @@
 .moqi-sheet-scroll td.is-active { position: relative; }
 .moqi-sheet-scroll td.is-active::after { content: ''; position: absolute; inset: -1px; border: 2px solid var(--accent); pointer-events: none; z-index: 1; }
 .moqi-sheet-scroll td input { width: 100%; height: 100%; box-sizing: border-box; border: 0; outline: 0; padding: 4px 7px; background: transparent; color: var(--text-primary); font: 13px/1.35 'Segoe UI', 'Microsoft YaHei', sans-serif; }
+
+.moqi-sheet-tabs {
+  min-height: 38px;
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  user-select: none;
+}
+.moqi-sheet-add {
+  width: 38px;
+  flex: none;
+  border: 0;
+  border-right: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 20px;
+  cursor: pointer;
+}
+.moqi-sheet-add:hover { color: var(--accent); background: var(--accent-soft); }
+.moqi-sheet-tab-scroll { min-width: 0; flex: 1; display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden; }
+.moqi-sheet-tab {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  min-width: 104px;
+  max-width: 220px;
+  border-right: 1px solid var(--border);
+  border-bottom: 2px solid transparent;
+  background: color-mix(in srgb, var(--bg-secondary) 86%, var(--bg-primary));
+}
+.moqi-sheet-tab.active { border-bottom-color: var(--accent); background: var(--bg-primary); }
+.moqi-sheet-tab-name,
+.moqi-sheet-tab-menu-button {
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+.moqi-sheet-tab-name { min-width: 0; flex: 1; padding: 0 5px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-size: 12px; }
+.moqi-sheet-tab.active .moqi-sheet-tab-name { color: var(--text-primary); font-weight: 600; }
+.moqi-sheet-tab-menu-button { width: 25px; flex: none; font-size: 13px; }
+.moqi-sheet-tab:hover .moqi-sheet-tab-menu-button,
+.moqi-sheet-tab-menu-button:hover { color: var(--accent); }
+.moqi-sheet-tab-menu {
+  position: absolute;
+  left: 8px;
+  bottom: 34px;
+  z-index: 20;
+  width: 126px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 20%, transparent);
+}
+.moqi-sheet-tab-menu button { width: 100%; height: 29px; padding: 0 9px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
+.moqi-sheet-tab-menu button:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.moqi-sheet-tab-menu button.danger { color: #ef4444; }
+.moqi-sheet-tab-hint { flex: none; display: flex; align-items: center; padding: 0 10px; border-left: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; }
 
 @media (max-width: 760px) {
   .moqi-sheet-toolbar { flex-wrap: wrap; }

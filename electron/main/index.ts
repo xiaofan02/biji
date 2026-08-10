@@ -931,6 +931,15 @@ ipcMain.handle(
     return r.filePath
   }
 )
+ipcMain.handle(
+  'export:save-binary',
+  async (_e, defaultName: string, data: Uint8Array, filters: { name: string; extensions: string[] }[]) => {
+    const result = await dialog.showSaveDialog({ defaultPath: defaultName, filters })
+    if (result.canceled || !result.filePath) return false
+    await fsp.writeFile(result.filePath, Buffer.from(data))
+    return true
+  }
+)
 
 // PDF 导出:离屏窗口加载 HTML -> printToPDF
 ipcMain.handle('export:pdf', async (_e, defaultName: string, html: string) => {

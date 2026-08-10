@@ -4,11 +4,19 @@ import { api } from '@/lib/api'
 import { ipc } from '@/lib/ipc'
 import { useAuth } from '@/store/useAuth'
 
-function onlyTeam(nodes: TreeNode[]): TreeNode[] {
+function onlyTeam(nodes: TreeNode[], insideTeamRoot = false): TreeNode[] {
   const result: TreeNode[] = []
   for (const node of nodes) {
-    const children = node.children ? onlyTeam(node.children) : []
-    if (node.visibility === 'team' || children.length) result.push({ ...node, children })
+    const isTeamRoot = node.path === '团队空间'
+    const inDedicatedSpace = insideTeamRoot || isTeamRoot
+    const children = node.children ? onlyTeam(node.children, inDedicatedSpace) : []
+    if (node.visibility === 'team' && (node.type === 'file' || inDedicatedSpace)) {
+      result.push({ ...node, children })
+    } else {
+      // 私人目录只是团队内容在服务器树中的路径容器，不能出现在团队资料树里。
+      // 将其中真正的团队节点提升一层，避免“个人笔记/BGP”被误认为团队文件夹。
+      result.push(...children)
+    }
   }
   return result
 }
@@ -97,4 +105,9 @@ export const useTeamSpace = create<TeamSpaceState>((set, get) => ({
 
 useAuth.subscribe((state, previous) => {
   if (state.status === 'in' && previous.status !== 'in') void useTeamSpace.getState().refresh()
+})
+
+window.addEventListener('moqi:document-visibility-local', (event) => {
+  const detail = (event as CustomEvent<{ path?: string; visibility?: string }>).detail
+  if (detail?.path && detail.visibility === 'private') useTeamSpace.getState().setTeamPath(detail.path, false)
 })

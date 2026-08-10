@@ -30,6 +30,7 @@ import { HistoryModal } from '@/components/history/HistoryModal'
 import { SyncCenter } from '@/components/sync/SyncCenter'
 import { TeamMembersModal } from '@/components/team/TeamMembersModal'
 import { DocumentPermissionsModal } from '@/components/team/DocumentPermissionsModal'
+import { RemoteSessionPermissionsModal } from '@/components/terminal/RemoteSessionPermissionsModal'
 import { TemplatePickerModal } from '@/components/templates/TemplatePickerModal'
 import { configureSyncInterval, pushAll } from '@/lib/sync'
 import { runDueWorkflows } from '@/lib/workflowScheduler'
@@ -192,6 +193,7 @@ export default function App() {
       <SyncCenter />
       <TeamMembersModal />
       <DocumentPermissionsModal />
+      <RemoteSessionPermissionsModal />
       <TemplatePickerModal />
       <PromptDialog />
       <ConfirmDialog />

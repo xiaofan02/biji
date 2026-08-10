@@ -72,6 +72,9 @@ const active = (): boolean => useAuth.getState().status === 'in' && useSync.getS
 let knownOffline = false
 // 已确认存在于服务器的 vpath(文件/目录),避免重复 createNode
 const knownNodes = new Set<string>()
+// 本机新建的个人文档必须保持 private。若服务器仍留有同路径的旧团队节点，
+// 首次同步时显式收回为个人范围，不能沿用旧节点的 visibility。
+const forcedPrivateNodes = new Set<string>()
 
 function isOffline(e: unknown): boolean {
   // 非 HTTP 层错误(fetch 抛 TypeError / 超时)基本就是网络不可达
@@ -153,6 +156,20 @@ function scheduleFlush(vpath: string, delay = PUSH_DEBOUNCE): void {
   const current = timers.get(vpath)
   if (current) clearTimeout(current)
   timers.set(vpath, setTimeout(() => void flush(vpath), delay))
+}
+
+export function markNodePrivate(localPath: string): void {
+  const vpath = localToVirtual(localPath)
+  if (!vpath) return
+  forcedPrivateNodes.add(vpath)
+  useTeamSpaceLazyRemove(vpath)
+}
+
+function useTeamSpaceLazyRemove(vpath: string): void {
+  // 避免 sync 与 store 形成静态循环依赖；该事件由团队 store 的现有公开 API 接收。
+  window.dispatchEvent(new CustomEvent('moqi:document-visibility-local', {
+    detail: { path: vpath, visibility: 'private' }
+  }))
 }
 
 // 保存成功后调用:把本地文档尽力上传到云端。永不 throw、永不阻塞编辑。
@@ -341,6 +358,10 @@ async function putWithEnsure(vpath: string, doc: BijiDoc): Promise<void> {
     } else {
       throw e
     }
+  }
+  if (forcedPrivateNodes.has(vpath)) {
+    await withTimeout(api.setVisibility(vpath, 'private'), 8000)
+    forcedPrivateNodes.delete(vpath)
   }
   const localPath = virtualToLocal(vpath)
   const prepared = await prepareDocForUpload(localPath, remote.id, doc)

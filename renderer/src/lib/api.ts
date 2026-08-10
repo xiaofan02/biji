@@ -77,7 +77,39 @@ export interface DocumentPermissionSettings {
   permissions: DocumentPermission[]
 }
 
+export interface KnowledgeSource {
+  path: string
+  title: string
+  excerpt: string
+  updatedAt: string
+}
+
+export interface SharedRemoteSession {
+  id: string
+  kind: 'ssh' | 'telnet'
+  name: string
+  host: string
+  port: number
+  username: string
+  folder: string
+  visibility: 'private' | 'team'
+  teamAccess: 'all' | 'restricted'
+  ownerId: string
+  accessLevel: 'use' | 'edit'
+  canManage: boolean
+}
+
 export const api = {
+  remoteSessions: (): Promise<SharedRemoteSession[]> => jget('/api/sessions').then((d) => d.sessions as SharedRemoteSession[]),
+  createRemoteSession: (session: Omit<SharedRemoteSession, 'id' | 'teamAccess' | 'ownerId' | 'accessLevel' | 'canManage'>): Promise<SharedRemoteSession> =>
+    jsend('POST', '/api/sessions', session).then((d) => d.session as SharedRemoteSession),
+  updateRemoteSession: (id: string, patch: Partial<SharedRemoteSession>): Promise<SharedRemoteSession> =>
+    jsend('PUT', `/api/sessions/${encodeURIComponent(id)}`, patch).then((d) => d.session as SharedRemoteSession),
+  removeRemoteSession: (id: string): Promise<void> => jsend('DELETE', `/api/sessions/${encodeURIComponent(id)}`).then(() => undefined),
+  remoteSessionPermissions: (id: string): Promise<{ access: 'all' | 'restricted'; ownerId: string; permissions: Array<{ userId: string; username: string; name: string; color: string; permission: 'use' | 'edit' }> }> =>
+    jget(`/api/sessions/${encodeURIComponent(id)}/permissions`),
+  setRemoteSessionPermissions: (id: string, access: 'all' | 'restricted', permissions: Array<{ userId: string; permission: 'use' | 'edit' }>): Promise<void> =>
+    jsend('PUT', `/api/sessions/${encodeURIComponent(id)}/permissions`, { access, permissions }).then(() => undefined),
   members: (): Promise<TeamMember[]> => jget('/api/auth/members').then((d) => d.members as TeamMember[]),
   setMemberRole: (id: string, role: 'admin' | 'editor' | 'viewer'): Promise<void> =>
     jsend('PUT', `/api/auth/members/${encodeURIComponent(id)}/role`, { role }).then(() => undefined),
@@ -109,6 +141,8 @@ export const api = {
   remove: (path: string): Promise<void> => jsend('DELETE', '/api/nodes', { path }).then(() => undefined),
   search: (q: string): Promise<SearchResult[]> =>
     jget('/api/search?q=' + encodeURIComponent(q)).then((d) => d.results as SearchResult[]),
+  knowledgeSearch: (question: string, limit = 6): Promise<KnowledgeSource[]> =>
+    jsend('POST', '/api/knowledge/search', { question, limit }).then((d) => d.results as KnowledgeSource[]),
   // 过渡期文档正文(Phase 2):整篇 BijiDoc 存/取在服务器。id = 服务器节点 UUID(= Phase 3 Yjs 房间名)。
   getDoc: (path: string): Promise<{ id: string; doc: BijiDoc | null }> =>
     jget('/api/doc?path=' + encodeURIComponent(path)).then((d) => ({ id: d.id as string, doc: (d.doc ?? null) as BijiDoc | null })),

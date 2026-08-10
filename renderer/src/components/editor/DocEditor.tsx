@@ -14,7 +14,7 @@ import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
 import './editor.css'
 
-import type { BijiDoc } from '@/types'
+import type { BijiDoc, Workflow } from '@/types'
 import { ipc } from '@/lib/ipc'
 import { bijiSchema } from '@/lib/blocknote'
 import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc, loadDoc } from '@/lib/note'
@@ -33,6 +33,9 @@ import { useCollaboration, type CollaborationSession } from '@/lib/collab'
 import { DocumentLinks } from '@/components/editor/DocumentLinks'
 import { prompt } from '@/store/usePrompt'
 import { saveCustomTemplate } from '@/lib/templates'
+import { api } from '@/lib/api'
+import { useWorkflows } from '@/store/useWorkflows'
+import { usePanes } from '@/store/usePanes'
 
 function SearchableSlashMenu({ query, ...props }: SuggestionMenuProps<DefaultReactSuggestionItem> & { query: string }) {
   const listRef = useRef<HTMLDivElement>(null)
@@ -224,6 +227,7 @@ export function DocEditor({
   const theme = useSettings((s) => s.theme)
   const setModified = useTabs((s) => s.setModified)
   const user = useAuth((s) => s.user)
+  const loggedIn = useAuth((s) => s.status === 'in')
   const teamReadOnly = useTeamSpace((s) => {
     const virtualPath = localToVirtual(path)
     if (!virtualPath || !s.teamPaths.has(virtualPath)) return false
@@ -240,6 +244,45 @@ export function DocEditor({
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
   const normalizingListsRef = useRef(false)
   const presence = useCollaboration((s) => s.documents[path])
+  const [access, setAccess] = useState<{ visibility: 'private' | 'team'; ownerId?: string } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!loggedIn) {
+      setAccess(null)
+      return
+    }
+    const virtualPath = localToVirtual(path)
+    if (!virtualPath) return
+    api.node(virtualPath)
+      .then((node) => {
+        if (!cancelled) setAccess({ visibility: node.visibility || 'team', ownerId: node.ownerId })
+      })
+      .catch(() => {
+        if (!cancelled) setAccess(null)
+      })
+    return () => { cancelled = true }
+  }, [path, loggedIn])
+
+  const toggleDocumentAccess = async () => {
+    if (!access) return
+    if (access.ownerId !== user?.id && !(user?.role === 'admin' && !access.ownerId)) {
+      toast('只有文档创建者或管理员可以修改访问范围', 'info')
+      return
+    }
+    const virtualPath = localToVirtual(path)
+    if (!virtualPath) return
+    const next = access.visibility === 'private' ? 'team' : 'private'
+    try {
+      await api.setVisibility(virtualPath, next)
+      setAccess({ ...access, visibility: next, ownerId: user?.id })
+      useTeamSpace.getState().setTeamPath(virtualPath, next === 'team')
+      await useTeamSpace.getState().refresh().catch(() => undefined)
+      toast(next === 'team' ? '已设为团队文档，同事可以查看并共同编辑' : '已设为个人文档，仅你可见', 'success')
+    } catch (error) {
+      toast('修改访问范围失败：' + (error as Error).message, 'error')
+    }
+  }
 
   // 标题:存进 BijiDoc.title(受控输入)。
   const [title, setTitle] = useState(seed.title || '')
@@ -648,31 +691,99 @@ export function DocEditor({
   const importSpreadsheet = async (file: File) => {
     try {
       const XLSX = await import('xlsx')
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
-      const sheets: any[] = []
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true, cellStyles: true })
+      const importedSheets: any[] = []
       let truncated = false
-      for (const sheetName of workbook.SheetNames.slice(0, 12)) {
+      for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName]
-        const source = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' })
-        const rows = source.filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim()))
-        if (!rows.length) continue
+        const source: unknown[][] = []
+        const decoded = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
+        if (decoded) {
+          for (let rowIndex = decoded.s.r; rowIndex <= decoded.e.r; rowIndex++) {
+            const row: unknown[] = []
+            for (let colIndex = decoded.s.c; colIndex <= decoded.e.c; colIndex++) {
+              const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })]
+              row.push(cell?.f ? `=${cell.f}` : cell?.w ?? cell?.v ?? '')
+            }
+            source.push(row)
+          }
+        }
+        const rows = [...source]
+        // 仅裁掉末尾空行，保留工作表内部和开头的空白位置，避免导入后单元格坐标错位。
+        while (rows.length && !rows.at(-1)?.some((cell) => String(cell ?? '').trim())) rows.pop()
+        if (!rows.length) rows.push([''])
         const width = Math.min(100, Math.max(...rows.map((row) => row.length), 1))
         const limited = rows.slice(0, 2000).map((row) =>
           Array.from({ length: width }, (_, index) => String(row[index] ?? ''))
         )
         if (rows.length > 2000 || Math.max(...rows.map((row) => row.length), 1) > 100) truncated = true
-        sheets.push({ type: 'spreadsheet', props: { name: sheetName, data: JSON.stringify(limited) } })
+        const columnWidths = (sheet['!cols'] || []).slice(0, width).map((column: any) => Math.round(column?.wpx || (column?.wch ? column.wch * 8 : 120)))
+        importedSheets.push({
+          id: crypto.randomUUID(),
+          name: sheetName,
+          data: JSON.stringify(limited),
+          styles: '{}',
+          columnWidths: JSON.stringify(columnWidths),
+          frozenRows: 0
+        })
       }
-      if (!sheets.length) throw new Error('工作簿中没有可导入的数据')
+      if (!importedSheets.length) throw new Error('工作簿中没有可导入的数据')
       const cursorBlock = editor.getTextCursorPosition?.().block || (editor.document as any[]).at(-1)
-      editor.insertBlocks(sheets as any, cursorBlock, 'after')
+      editor.insertBlocks([{
+        type: 'spreadsheet',
+        props: {
+          name: importedSheets[0].name,
+          data: importedSheets[0].data,
+          columnWidths: importedSheets[0].columnWidths,
+          sheets: JSON.stringify(importedSheets),
+          activeSheet: 0
+        }
+      }] as any, cursorBlock, 'after')
       setModified(path, true)
-      toast(truncated ? '表格已导入；超大工作表按每页 2000 行、100 列截取' : '表格已导入，可像工作表一样继续编辑', 'success')
+      toast(truncated ? '工作簿已导入；超大工作表按每页 2000 行、100 列截取' : `工作簿已导入，共 ${importedSheets.length} 个工作表`, 'success')
     } catch (error) {
       toast(`表格导入失败：${(error as Error).message}`, 'error')
     } finally {
       if (tableInputRef.current) tableInputRef.current.value = ''
     }
+  }
+
+  const exportSpreadsheets = async () => {
+    const blocks = (editor.document as any[]).filter((block) => block.type === 'spreadsheet')
+    if (!blocks.length) return toast('当前笔记中没有 Excel 工作表', 'error')
+    const XLSX = await import('xlsx')
+    const workbook = XLSX.utils.book_new()
+    const used = new Set<string>()
+    const sheets = blocks.flatMap((block, blockIndex) => {
+      try {
+        const parsed = JSON.parse(block.props?.sheets || '[]')
+        if (Array.isArray(parsed) && parsed.length) return parsed
+      } catch { /* 兼容旧工作表块 */ }
+      return [{
+        name: block.props?.name || `Sheet${blockIndex + 1}`,
+        data: block.props?.data || '[[]]',
+        columnWidths: block.props?.columnWidths || '[]'
+      }]
+    })
+    for (const [index, item] of sheets.entries()) {
+      let data: unknown[][] = [[]]
+      try { data = typeof item.data === 'string' ? JSON.parse(item.data) : item.data } catch { /* 空工作表 */ }
+      let name = String(item.name || `Sheet${index + 1}`).replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31) || `Sheet${index + 1}`
+      while (used.has(name)) name = `${name.slice(0, 27)}-${index + 1}`
+      used.add(name)
+      const sheet = XLSX.utils.aoa_to_sheet(data)
+      data.forEach((row, rowIndex) => row.forEach((value, colIndex) => {
+        if (typeof value === 'string' && value.startsWith('=')) sheet[XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })] = { t: 'n', f: value.slice(1) }
+      }))
+      try {
+        const widths = typeof item.columnWidths === 'string' ? JSON.parse(item.columnWidths || '[]') as number[] : item.columnWidths || []
+        sheet['!cols'] = widths.map((pixels: number) => ({ wpx: pixels }))
+      } catch { /* 默认列宽 */ }
+      XLSX.utils.book_append_sheet(workbook, sheet, name)
+    }
+    const data = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
+    await ipc.exporter.saveBinary(`${titleRef.current || '墨启工作簿'}.xlsx`, new Uint8Array(data), [{ name: 'Excel 工作簿', extensions: ['xlsx'] }])
+    toast(`已导出 ${sheets.length} 个工作表`, 'success')
   }
 
   useEffect(() => {
@@ -752,13 +863,45 @@ export function DocEditor({
 
   const openDocumentMenu = (event: React.MouseEvent) => {
     if ((event.target as HTMLElement).closest('input, textarea')) return
+    // 右键菜单取得焦点后 DOM 选区可能被编辑器折叠，因此在菜单出现前保存文本。
+    // ProseMirror 内部选区作为备用，可覆盖代码块等浏览器 Selection 不稳定的情况。
+    let selectedText = window.getSelection()?.toString().trim() || ''
+    if (!selectedText) {
+      try {
+        selectedText = editor.transact((tr: any) =>
+          tr.selection.empty ? '' : tr.doc.textBetween(tr.selection.from, tr.selection.to, '\n')
+        ).trim()
+      } catch {
+        selectedText = ''
+      }
+    }
     const fire = (name: string) => () => window.dispatchEvent(new CustomEvent(name))
     showContextMenu(event, [
       { label: '历史版本', iconName: 'refresh', onClick: () => window.dispatchEvent(new CustomEvent('moqi:open-history', { detail: { path } })) },
       { label: '发送选中内容到终端', iconName: 'terminal', onClick: () => {
-        const text = window.getSelection()?.toString().trim() || ''
-        if (!text) return toast('请先选中要发送的命令或文字', 'error')
-        window.dispatchEvent(new CustomEvent('biji:send-to-terminal', { detail: { text } }))
+        if (!selectedText) return toast('请先选中要发送的命令或文字', 'error')
+        window.dispatchEvent(new CustomEvent('biji:send-to-terminal', { detail: { text: selectedText } }))
+      } },
+      { label: '在当前终端执行选中命令', iconName: 'terminal', onClick: () => {
+        if (!selectedText) return toast('请先选中要执行的命令', 'error')
+        window.dispatchEvent(new CustomEvent('biji:send-to-terminal', { detail: { text: selectedText, execute: true } }))
+      } },
+      { label: '将选中命令转为自动化任务', iconName: 'workflow', onClick: async () => {
+        if (!selectedText) return toast('请先选中要加入任务的命令', 'error')
+        if (!useWorkflows.getState().loaded) await useWorkflows.getState().load()
+        const now = Date.now()
+        const workflow: Workflow = {
+          id: crypto.randomUUID(),
+          name: `${titleRef.current || '笔记命令'} · 自动化任务`,
+          createdAt: now,
+          updatedAt: now,
+          steps: [{ id: crypto.randomUUID(), title: '执行笔记命令', hostId: '', commands: selectedText }],
+          schedule: { enabled: false, mode: 'manual' }
+        }
+        useWorkflows.getState().upsert(workflow)
+        useUI.getState().setActivityView('workflow')
+        usePanes.getState().focusOrOpen('workflow')
+        toast('已创建自动化任务，请选择目标设备后运行或设置计划', 'success')
       } },
       { label: '保存为模板', iconName: 'book-open', onClick: async () => {
         const name = await prompt('模板名称', titleRef.current || '自定义模板')
@@ -769,7 +912,8 @@ export function DocEditor({
       { label: '导出 Markdown', iconName: 'file-text', onClick: fire('biji:export-md') },
       { label: '导出 PDF', iconName: 'file', onClick: fire('biji:export-pdf') },
       { label: '导出 Word', iconName: 'file', onClick: fire('biji:export-word') },
-      { label: '导出 HTML', iconName: 'file', onClick: fire('biji:export-html') }
+      { label: '导出 HTML', iconName: 'file', onClick: fire('biji:export-html') },
+      { label: '导出 Excel 工作簿', iconName: 'file', onClick: () => void exportSpreadsheets() }
     ])
   }
 
@@ -812,7 +956,17 @@ export function DocEditor({
                     : presence?.status === 'offline'
                       ? '协作离线'
                       : '正在连接协作'}
-              </span>
+                </span>
+              )}
+            {access && (
+              <button
+                type="button"
+                className={`doc-access-badge ${access.visibility}`}
+                onClick={() => void toggleDocumentAccess()}
+                title={access.visibility === 'team' ? '团队文档：点击改为个人文档' : '个人文档：点击开放给团队'}
+              >
+                {access.visibility === 'team' ? '团队文档' : '个人文档'}
+              </button>
             )}
             {presence?.users && presence.users.length > 1 && (
               <span className="collab-avatars" aria-label="当前协作者">
@@ -1006,24 +1160,35 @@ function CodeBlockCopy({ containerRef }: { containerRef: React.RefObject<HTMLDiv
   }, [containerRef])
 
   if (!pos) return null
-  const copy = () => {
+  const readCode = () => {
     const blk = targetRef.current
-    if (!blk) return
+    if (!blk) return ''
     const code = blk.querySelector('code') || blk.querySelector('pre') || blk
-    navigator.clipboard.writeText((code as HTMLElement).innerText || '').then(() => {
+    return (code as HTMLElement).innerText || ''
+  }
+  const copy = () => {
+    const code = readCode()
+    if (!code) return
+    navigator.clipboard.writeText(code).then(() => {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     })
   }
+  const sendToTerminal = (execute: boolean) => {
+    const code = readCode().trim()
+    if (!code) return toast('代码块中没有可发送的命令', 'error')
+    window.dispatchEvent(new CustomEvent('biji:send-to-terminal', { detail: { text: code, execute } }))
+  }
   return (
-    <button
-      className="code-copy-float"
+    <div
+      className="code-action-float"
       style={{ top: pos.top, left: pos.left }}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={copy}
     >
-      {copied ? '✓ 已复制' : '复制'}
-    </button>
+      <button type="button" onClick={copy}>{copied ? '✓ 已复制' : '复制'}</button>
+      <button type="button" onClick={() => sendToTerminal(false)}>发送</button>
+      <button type="button" className="run" onClick={() => sendToTerminal(true)} title="直接在当前活动终端执行整段命令">执行</button>
+    </div>
   )
 }
 

@@ -336,6 +336,94 @@ treeRouter.get(
   })
 )
 
+type KnowledgeRow = {
+  path: string
+  name: string
+  title: string | null
+  content: unknown
+  updated_at: Date
+}
+
+function knowledgeText(value: unknown, out: string[]): void {
+  if (typeof value === 'string') {
+    if (!value.startsWith('data:') && value.length < 100_000) out.push(value)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) knowledgeText(item, out)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (!['id', 'type', 'styles', 'url'].includes(key)) knowledgeText(child, out)
+    }
+  }
+}
+
+function knowledgeTerms(question: string): string[] {
+  const normalized = question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const terms = new Set<string>()
+  for (const token of normalized.split(/\s+/).filter(Boolean)) {
+    if (/^[\p{Script=Han}]+$/u.test(token) && token.length > 2) {
+      for (let index = 0; index < token.length - 1; index++) terms.add(token.slice(index, index + 2))
+    } else if (token.length > 1) {
+      terms.add(token)
+    }
+  }
+  return [...terms].slice(0, 24)
+}
+
+// 企业知识库检索：只返回当前用户有权读取的团队文档。
+// 个人文档不会进入候选集，避免 AI 上下文绕过现有访问权限。
+treeRouter.post(
+  '/knowledge/search',
+  asyncHandler(async (req, res) => {
+    const question = String((req.body ?? {}).question ?? '').trim()
+    if (!question) throw new HttpError(400, '请输入要查询的问题')
+    const limit = Math.max(1, Math.min(Number((req.body ?? {}).limit) || 6, 10))
+    const { rows } = await pool.query<KnowledgeRow>(
+      `SELECT n.path, n.name, n.title, n.content, n.updated_at
+       FROM nodes n
+       WHERE n.type='file' AND n.ext='bnote' AND n.visibility='team' AND n.content IS NOT NULL
+         AND ${readAccess('n', '$1', '$2')}
+       ORDER BY n.updated_at DESC LIMIT 800`,
+      [req.user!.id, req.user!.role]
+    )
+    const terms = knowledgeTerms(question)
+    const ranked = rows.map((row) => {
+      const parts: string[] = []
+      knowledgeText(row.content, parts)
+      const text = parts.join('\n').replace(/\s+/g, ' ').trim()
+      const title = row.title || row.name.replace(/\.bnote$/i, '')
+      const lowerTitle = title.toLowerCase()
+      const lowerText = text.toLowerCase()
+      let score = 0
+      let first = -1
+      for (const term of terms) {
+        if (lowerTitle.includes(term)) score += 12
+        let at = lowerText.indexOf(term)
+        if (at >= 0) {
+          score += 2
+          if (first < 0 || at < first) first = at
+          for (let next = lowerText.indexOf(term, at + term.length); next >= 0 && score < 80; next = lowerText.indexOf(term, next + term.length)) score++
+        }
+      }
+      const start = Math.max(0, (first < 0 ? 0 : first) - 120)
+      return {
+        path: row.path,
+        title,
+        excerpt: text.slice(start, start + 1200),
+        updatedAt: row.updated_at,
+        score
+      }
+    }).filter((item) => item.score > 0 && item.excerpt)
+      .sort((a, b) => b.score - a.score || b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, limit)
+
+    res.json({ results: ranked.map(({ score: _score, ...item }) => item) })
+  })
+)
+
 // 个人/团队切换。只有创建者能改变范围；团队成员可以共同编辑，但不能擅自改变公开级别。
 treeRouter.get(
   '/nodes/permissions',

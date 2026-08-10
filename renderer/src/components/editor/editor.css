@@ -78,6 +78,22 @@
 .collab-presence.connecting .collab-live-dot { background: var(--accent); animation: collab-meta-pulse 1.4s infinite; }
 .collab-presence.error { color: #d84d5b; }
 .collab-presence.error .collab-live-dot { background: #ef5b68; }
+.doc-access-badge {
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--text-tertiary);
+  background: var(--bg-canvas);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.doc-access-badge:hover { color: var(--text-secondary); background: var(--bg-secondary); }
+.doc-access-badge.team {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 @keyframes collab-meta-pulse { 50% { opacity: 0.35; } }
 .collab-avatars {
   display: inline-flex;
@@ -431,29 +447,38 @@
   color: var(--text);
   background: var(--bg-hover);
 }
-.code-copy-float {
+.code-action-float {
   position: absolute;
   z-index: 5;
   transform: translateX(-100%);
   display: inline-flex;
   align-items: center;
-  height: 24px;
-  padding: 0 10px;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  color: var(--text-secondary);
+  gap: 1px;
+  padding: 2px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 6px;
-  cursor: pointer;
   user-select: none;
   box-shadow: var(--shadow-sm);
 }
-.code-copy-float:hover {
+.code-action-float button {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.code-action-float button:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
+.code-action-float button.run { color: var(--accent); }
+.code-action-float button.run:hover { background: var(--accent-soft); }
 
 /* 代码块行号槽:.doc-area 的绝对定位子层(随内容滚动),与代码同 line-height/padding-top 逐行对齐。
    宽 52px,右侧 border 作为与代码的分割线;pre 的 padding-left:60px 在分割线后再留 8px 间隙。
