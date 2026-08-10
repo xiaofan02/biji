@@ -6,7 +6,7 @@ import {
   type DefaultReactSuggestionItem,
   type SuggestionMenuProps
 } from '@blocknote/react'
-import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
+import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { withCollaboration } from '@blocknote/core/yjs'
@@ -74,6 +74,25 @@ function SearchableSlashMenu({ query, ...props }: SuggestionMenuProps<DefaultRea
       </div>
     </div>
   )
+}
+
+function normalizeSlashQuery(value: string): string {
+  return value.normalize('NFKC').toLocaleLowerCase().replace(/[\s\-_]+/g, '')
+}
+
+// BlockNote 默认的模糊筛选更偏向英文单词，连续输入两个以上中文字符时可能把
+// 本来存在的命令过滤掉。这里按标题、别名、说明和分组做连续词匹配，同时保留
+// 空格分隔的多关键词搜索，例如“一级 标题”和“excel 表格”都可以命中。
+function filterSlashItems(items: DefaultReactSuggestionItem[], query: string): DefaultReactSuggestionItem[] {
+  const rawTokens = query.trim().split(/\s+/).filter(Boolean)
+  if (rawTokens.length === 0) return items
+  const tokens = rawTokens.map(normalizeSlashQuery).filter(Boolean)
+  return items.filter((item) => {
+    const fields = [item.title, item.subtext, item.group, ...(item.aliases || [])]
+      .filter((value): value is string => typeof value === 'string')
+      .map(normalizeSlashQuery)
+    return tokens.every((token) => fields.some((field) => field.includes(token)))
+  })
 }
 
 interface Heading {
@@ -1003,7 +1022,7 @@ export function DocEditor({
                   },
                   ...getDefaultReactSlashMenuItems(editor)
                 ]
-                return filterSuggestionItems(items, query)
+                return filterSlashItems(items, query)
               }}
               suggestionMenuComponent={(props) => <SearchableSlashMenu {...props} query={slashQuery} />}
             />

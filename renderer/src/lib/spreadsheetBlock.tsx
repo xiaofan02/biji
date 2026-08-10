@@ -174,6 +174,7 @@ function SpreadsheetView({ block, editor }: any) {
   const widths = useMemo(() => parseJson<number[]>(sheet.columnWidths, []), [sheet.columnWidths])
   const [editing, setEditing] = useState<string | null>(null)
   const [filterText, setFilterText] = useState('')
+  const [ribbonTab, setRibbonTab] = useState<'home' | 'insert' | 'data' | 'view'>('home')
   const [sheetMenu, setSheetMenu] = useState<number | null>(null)
   const draggedSheet = useRef<number | null>(null)
 
@@ -393,37 +394,97 @@ function SpreadsheetView({ block, editor }: any) {
 
   return (
     <div className="moqi-spreadsheet" contentEditable={false}>
-      <div className="moqi-sheet-toolbar">
+      <div className="moqi-sheet-ribbon-tabs">
+        <span className="moqi-sheet-app-mark" aria-hidden="true">X</span>
+        {([
+          ['home', '开始'],
+          ['insert', '插入'],
+          ['data', '数据'],
+          ['view', '视图']
+        ] as const).map(([id, label]) => (
+          <button key={id} type="button" className={ribbonTab === id ? 'active' : ''} onClick={() => setRibbonTab(id)}>{label}</button>
+        ))}
         <input
           className="moqi-sheet-name"
           value={sheet.name}
           aria-label="工作表名称"
+          title="工作表名称"
           onChange={(event) => updateSheet({ name: event.target.value })}
         />
-        <span className="moqi-sheet-range">{columnName(range.left)}{range.top + 1}{range.left !== range.right || range.top !== range.bottom ? `:${columnName(range.right)}${range.bottom + 1}` : ''}</span>
-        <button type="button" title="加粗" onClick={() => updateSelectionStyle({ bold: !styles[cellKey(active.row, active.col)]?.bold })}><strong>B</strong></button>
-        <button type="button" title="左对齐" onClick={() => updateSelectionStyle({ align: 'left' })}>左</button>
-        <button type="button" title="居中" onClick={() => updateSelectionStyle({ align: 'center' })}>中</button>
-        <button type="button" title="右对齐" onClick={() => updateSelectionStyle({ align: 'right' })}>右</button>
-        <input type="color" title="文字颜色" value={styles[cellKey(active.row, active.col)]?.color || '#1f2329'} onChange={(event) => updateSelectionStyle({ color: event.target.value })} />
-        <input type="color" title="填充颜色" value={styles[cellKey(active.row, active.col)]?.background || '#ffffff'} onChange={(event) => updateSelectionStyle({ background: event.target.value })} />
-        <button type="button" title="缩小当前列" onClick={() => resizeColumn(-20)}>列−</button>
-        <button type="button" title="加宽当前列" onClick={() => resizeColumn(20)}>列＋</button>
-        <button type="button" onClick={addRow}>＋ 行</button>
-        <button type="button" onClick={addColumn}>＋ 列</button>
-        <button type="button" onClick={insertRow}>上方插行</button>
-        <button type="button" onClick={insertColumn}>左侧插列</button>
-        <button type="button" onClick={deleteRows}>删除行</button>
-        <button type="button" onClick={deleteColumns}>删除列</button>
-        <button type="button" title="按当前列升序" onClick={() => sortRows(1)}>升序</button>
-        <button type="button" title="按当前列降序" onClick={() => sortRows(-1)}>降序</button>
-        <button type="button" onClick={() => updateSheet({ frozenRows: sheet.frozenRows ? 0 : 1 })}>{sheet.frozenRows ? '取消冻结' : '冻结首行'}</button>
-        <button type="button" onClick={findReplace}>替换</button>
+      </div>
+      <div className="moqi-sheet-ribbon">
+        {ribbonTab === 'home' && <>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" title="复制所选单元格" onClick={() => void copyRange()}><span>▣</span><small>复制</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="清除所选内容" onClick={clearRange}><span>⌫</span><small>清除</small></button>
+            <label>剪贴板</label>
+          </div>
+          <div className="moqi-ribbon-group">
+            <div className="moqi-ribbon-row">
+              <button type="button" className={styles[cellKey(active.row, active.col)]?.bold ? 'is-pressed' : ''} title="加粗" onClick={() => updateSelectionStyle({ bold: !styles[cellKey(active.row, active.col)]?.bold })}><strong>B</strong></button>
+              <label className="moqi-color-control" title="文字颜色"><strong>A</strong><i style={{ background: styles[cellKey(active.row, active.col)]?.color || '#d13438' }} /><input type="color" value={styles[cellKey(active.row, active.col)]?.color || '#1f2329'} onChange={(event) => updateSelectionStyle({ color: event.target.value })} /></label>
+              <label className="moqi-color-control fill" title="填充颜色"><span>▰</span><i style={{ background: styles[cellKey(active.row, active.col)]?.background || '#fff2cc' }} /><input type="color" value={styles[cellKey(active.row, active.col)]?.background || '#ffffff'} onChange={(event) => updateSelectionStyle({ background: event.target.value })} /></label>
+            </div>
+            <label>字体</label>
+          </div>
+          <div className="moqi-ribbon-group">
+            <div className="moqi-ribbon-row">
+              <button type="button" title="左对齐" onClick={() => updateSelectionStyle({ align: 'left' })}>☰</button>
+              <button type="button" title="居中" onClick={() => updateSelectionStyle({ align: 'center' })}>≡</button>
+              <button type="button" title="右对齐" onClick={() => updateSelectionStyle({ align: 'right' })}>☷</button>
+            </div>
+            <label>对齐方式</label>
+          </div>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" onClick={findReplace}><span>⌕</span><small>查找替换</small></button>
+            <label>编辑</label>
+          </div>
+        </>}
+        {ribbonTab === 'insert' && <>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" onClick={insertRow}><span>＋</span><small>上方插入行</small></button>
+            <button type="button" className="moqi-ribbon-command large" onClick={insertColumn}><span>＋</span><small>左侧插入列</small></button>
+            <label>插入单元格</label>
+          </div>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" onClick={addRow}><span>↓</span><small>末尾新增行</small></button>
+            <button type="button" className="moqi-ribbon-command large" onClick={addColumn}><span>→</span><small>末尾新增列</small></button>
+            <label>扩展工作表</label>
+          </div>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large danger" onClick={deleteRows}><span>−</span><small>删除所选行</small></button>
+            <button type="button" className="moqi-ribbon-command large danger" onClick={deleteColumns}><span>−</span><small>删除所选列</small></button>
+            <label>删除</label>
+          </div>
+        </>}
+        {ribbonTab === 'data' && <>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" title="按当前列升序" onClick={() => sortRows(1)}><span>A↓Z</span><small>升序</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="按当前列降序" onClick={() => sortRows(-1)}><span>Z↓A</span><small>降序</small></button>
+            <label>排序</label>
+          </div>
+          <div className="moqi-ribbon-group moqi-ribbon-filter-group">
+            <input className="moqi-sheet-filter" value={filterText} onChange={(event) => setFilterText(event.target.value)} placeholder={`筛选 ${columnName(active.col)} 列`} />
+            <button type="button" onClick={() => setFilterText('')}>清除筛选</button>
+            <label>筛选</label>
+          </div>
+        </>}
+        {ribbonTab === 'view' && <>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" onClick={() => updateSheet({ frozenRows: sheet.frozenRows ? 0 : 1 })}><span>▤</span><small>{sheet.frozenRows ? '取消冻结' : '冻结首行'}</small></button>
+            <label>窗口</label>
+          </div>
+          <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" title="缩小当前列" onClick={() => resizeColumn(-20)}><span>↔</span><small>缩小列宽</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="加宽当前列" onClick={() => resizeColumn(20)}><span>⟷</span><small>加宽列宽</small></button>
+            <label>列宽</label>
+          </div>
+        </>}
       </div>
       <div className="moqi-formula-bar">
-        <span>fx</span>
+        <span className="moqi-sheet-range">{columnName(range.left)}{range.top + 1}{range.left !== range.right || range.top !== range.bottom ? `:${columnName(range.right)}${range.bottom + 1}` : ''}</span>
+        <span className="moqi-formula-fx">fx</span>
         <input value={grid[active.row]?.[active.col] || ''} onChange={(event) => updateCell(active.row, active.col, event.target.value)} placeholder="输入值或公式，例如 =SUM(A1:A10)" />
-        <input className="moqi-sheet-filter" value={filterText} onChange={(event) => setFilterText(event.target.value)} placeholder="筛选当前列" />
       </div>
       <div
         className="moqi-sheet-scroll"

@@ -1,64 +1,203 @@
 .moqi-spreadsheet {
   width: min(100%, 1120px);
   margin: 10px 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, #107c41 16%);
+  border-radius: 7px;
   overflow: hidden;
   background: var(--bg-primary);
-  box-shadow: 0 5px 18px color-mix(in srgb, #000 7%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, #000 9%, transparent);
 }
 
-.moqi-sheet-toolbar {
-  min-height: 42px;
+.moqi-sheet-ribbon-tabs {
+  height: 35px;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 8px;
+  gap: 1px;
+  padding: 0 7px 0 0;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-  overflow-x: auto;
+  background: color-mix(in srgb, var(--bg-secondary) 92%, #107c41 8%);
 }
+.moqi-sheet-app-mark {
+  width: 38px;
+  height: 35px;
+  display: grid;
+  place-items: center;
+  margin-right: 3px;
+  color: #fff;
+  background: #107c41;
+  font: 700 15px/1 'Segoe UI', sans-serif;
+}
+.moqi-sheet-ribbon-tabs > button {
+  align-self: stretch;
+  min-width: 52px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  background: transparent;
+  font: 12px 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  cursor: pointer;
+}
+.moqi-sheet-ribbon-tabs > button:hover { color: var(--text-primary); background: color-mix(in srgb, var(--bg-primary) 55%, transparent); }
+.moqi-sheet-ribbon-tabs > button.active { color: #107c41; border-bottom-color: #107c41; background: var(--bg-primary); font-weight: 600; }
 
 .moqi-sheet-name {
   width: 150px;
-  height: 29px;
+  height: 25px;
+  margin-left: auto;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 0 8px;
   color: var(--text-primary);
   background: transparent;
-  font-weight: 600;
+  font: 600 12px 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  text-align: right;
 }
 
 .moqi-sheet-name:focus { border-color: var(--accent); outline: none; background: var(--bg-primary); }
-.moqi-sheet-range { min-width: 58px; color: var(--text-tertiary); font: 12px Consolas, monospace; }
-.moqi-sheet-toolbar button {
-  height: 29px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-secondary);
+
+.moqi-sheet-ribbon {
+  min-height: 73px;
+  display: flex;
+  align-items: stretch;
+  padding: 4px 5px 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
   background: var(--bg-primary);
+  scrollbar-width: thin;
+}
+.moqi-ribbon-group {
+  position: relative;
+  min-width: 92px;
+  padding: 4px 10px 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border);
+}
+.moqi-ribbon-group:last-child { border-right: 0; }
+.moqi-ribbon-group > label:last-child {
+  position: absolute;
+  right: 4px;
+  bottom: 1px;
+  left: 4px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.moqi-ribbon-group.compact { gap: 4px; min-width: auto; }
+.moqi-ribbon-row { display: flex; align-items: center; gap: 3px; }
+.moqi-sheet-ribbon button,
+.moqi-color-control {
+  min-width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  background: transparent;
+  font: 12px 'Segoe UI', 'Microsoft YaHei', sans-serif;
   cursor: pointer;
 }
-.moqi-sheet-toolbar button:hover { color: var(--accent); border-color: var(--accent); }
-.moqi-sheet-toolbar input[type='color'] { width: 29px; height: 29px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); }
-.moqi-formula-bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--bg-primary); }
-.moqi-formula-bar > span { color: var(--accent); font: italic 600 13px Georgia, serif; }
-.moqi-formula-bar input { flex: 1; min-width: 100px; height: 27px; border: 1px solid transparent; border-radius: 5px; padding: 0 7px; color: var(--text-primary); background: var(--bg-secondary); outline: none; }
-.moqi-formula-bar input:focus { border-color: var(--accent); }
-.moqi-formula-bar .moqi-sheet-filter { flex: 0 0 150px; }
+.moqi-sheet-ribbon button:hover,
+.moqi-color-control:hover { color: var(--text-primary); border-color: var(--border); background: var(--bg-secondary); }
+.moqi-sheet-ribbon button.is-pressed { color: #107c41; border-color: color-mix(in srgb, #107c41 35%, var(--border)); background: color-mix(in srgb, #107c41 12%, var(--bg-primary)); }
+.moqi-ribbon-command.large {
+  width: auto;
+  min-width: 46px;
+  height: 48px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 6px;
+}
+.moqi-ribbon-command.large > span { min-height: 19px; display: flex; align-items: center; font-size: 15px; }
+.moqi-ribbon-command.large > small { font-size: 10px; white-space: nowrap; }
+.moqi-ribbon-command.danger:hover { color: #d13438; }
+.moqi-color-control { position: relative; flex-direction: column; gap: 1px; padding: 2px 7px; }
+.moqi-color-control > i { width: 16px; height: 3px; display: block; }
+.moqi-color-control > input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.moqi-color-control.fill > span { font-size: 15px; line-height: 15px; }
+.moqi-ribbon-filter-group { min-width: 230px; gap: 5px; }
+.moqi-sheet-filter {
+  width: 135px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 7px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  outline: none;
+  font-size: 12px;
+}
+.moqi-sheet-filter:focus { border-color: #107c41; background: var(--bg-primary); }
+
+.moqi-formula-bar {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+.moqi-sheet-range {
+  width: 74px;
+  min-width: 74px;
+  height: 31px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  color: var(--text-secondary);
+  font: 12px Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moqi-formula-fx {
+  width: 36px;
+  min-width: 36px;
+  color: #107c41;
+  font: italic 600 13px Georgia, serif;
+  text-align: center;
+}
+.moqi-formula-bar > input {
+  flex: 1;
+  min-width: 100px;
+  height: 31px;
+  box-sizing: border-box;
+  border: 0;
+  border-left: 1px solid var(--border);
+  padding: 0 8px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  outline: none;
+  font: 12px Consolas, 'Microsoft YaHei', monospace;
+}
+.moqi-formula-bar > input:focus { box-shadow: inset 0 -2px #107c41; }
 
 .moqi-sheet-scroll { max-height: 520px; overflow: auto; outline: none; }
 .moqi-sheet-scroll table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: max-content; min-width: 100%; }
 .moqi-sheet-scroll th, .moqi-sheet-scroll td { box-sizing: border-box; height: 30px; padding: 0; border: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.moqi-sheet-scroll thead th { position: sticky; top: 0; z-index: 3; min-width: 120px; background: var(--bg-secondary); color: var(--text-tertiary); font: 12px/30px 'Segoe UI', sans-serif; text-align: center; }
+.moqi-sheet-scroll thead th { position: sticky; top: 0; z-index: 3; min-width: 120px; background: color-mix(in srgb, var(--bg-secondary) 96%, #107c41 4%); color: var(--text-secondary); font: 12px/30px 'Segoe UI', sans-serif; text-align: center; }
 .moqi-sheet-scroll .moqi-sheet-corner { left: 0; z-index: 5; min-width: 42px; width: 42px; }
 .moqi-sheet-row-number { position: sticky; left: 0; z-index: 2; width: 42px; min-width: 42px; background: var(--bg-secondary); color: var(--text-tertiary); font: 12px/30px 'Segoe UI', sans-serif; text-align: center; }
 .moqi-sheet-scroll td { min-width: 120px; background: var(--bg-primary); }
-.moqi-sheet-scroll td.is-selected { background: color-mix(in srgb, var(--accent) 10%, var(--bg-primary)); }
+.moqi-sheet-scroll td.is-selected { background: color-mix(in srgb, #107c41 9%, var(--bg-primary)); }
 .moqi-sheet-scroll td.is-active { position: relative; }
-.moqi-sheet-scroll td.is-active::after { content: ''; position: absolute; inset: -1px; border: 2px solid var(--accent); pointer-events: none; z-index: 1; }
+.moqi-sheet-scroll td.is-active::after { content: ''; position: absolute; inset: -1px; border: 2px solid #107c41; pointer-events: none; z-index: 1; }
 .moqi-sheet-scroll td input { width: 100%; height: 100%; box-sizing: border-box; border: 0; outline: 0; padding: 4px 7px; background: transparent; color: var(--text-primary); font: 13px/1.35 'Segoe UI', 'Microsoft YaHei', sans-serif; }
 
 .moqi-sheet-tabs {
@@ -92,7 +231,7 @@
   border-bottom: 2px solid transparent;
   background: color-mix(in srgb, var(--bg-secondary) 86%, var(--bg-primary));
 }
-.moqi-sheet-tab.active { border-bottom-color: var(--accent); background: var(--bg-primary); }
+.moqi-sheet-tab.active { border-bottom-color: #107c41; background: var(--bg-primary); }
 .moqi-sheet-tab-name,
 .moqi-sheet-tab-menu-button {
   border: 0;
@@ -123,6 +262,7 @@
 .moqi-sheet-tab-hint { flex: none; display: flex; align-items: center; padding: 0 10px; border-left: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; }
 
 @media (max-width: 760px) {
-  .moqi-sheet-toolbar { flex-wrap: wrap; }
-  .moqi-sheet-name { flex: 1; }
+  .moqi-sheet-name { width: 110px; }
+  .moqi-sheet-ribbon { min-height: 67px; }
+  .moqi-ribbon-group { padding-inline: 6px; }
 }
