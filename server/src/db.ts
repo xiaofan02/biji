@@ -66,6 +66,17 @@ ALTER TABLE nodes ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES users(id) 
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'team';
 ALTER TABLE nodes ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_nodes_visibility_owner ON nodes(visibility, owner_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ;
+ALTER TABLE nodes ADD COLUMN IF NOT EXISTS team_access TEXT NOT NULL DEFAULT 'all';
+
+CREATE TABLE IF NOT EXISTS node_permissions (
+  node_id       UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission    TEXT NOT NULL CHECK (permission IN ('view', 'edit')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (node_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_node_permissions_user ON node_permissions(user_id, node_id);
 `
 
 export async function migrate(): Promise<void> {

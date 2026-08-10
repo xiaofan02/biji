@@ -6,9 +6,7 @@ import { usePanes } from '@/store/usePanes'
 import { useSettings } from '@/store/useSettings'
 import { useTabs } from '@/store/useTabs'
 import { useWorkspace } from '@/store/useWorkspace'
-import { createDoc } from '@/lib/note'
 import { toast } from '@/store/useToast'
-import { prompt } from '@/store/usePrompt'
 import { Icon } from '@/components/common/Icon'
 import type { SearchResult } from '@/types'
 
@@ -27,7 +25,6 @@ export function TopBar() {
   const theme = useSettings((s) => s.theme)
   const setTheme = useSettings((s) => s.setTheme)
   const openTab = useTabs((s) => s.open)
-  const refresh = useWorkspace((s) => s.refresh)
   const setActivePath = useWorkspace((s) => s.setActivePath)
 
   const [results, setResults] = useState<SearchResult[]>([])
@@ -43,7 +40,7 @@ export function TopBar() {
       setUpdateStatus(status)
       if (status.phase !== updatePhaseRef.current) {
         if (status.phase === 'available') toast(status.message || '发现新版本', 'success')
-        if (status.phase === 'downloaded') toast('更新已下载，点击“安装更新”即可升级', 'success')
+        if (status.phase === 'downloaded') toast('更新已下载，正在安装并重启', 'success')
         if (status.phase === 'error') toast(`更新失败：${status.message || '请稍后重试'}`, 'error')
         updatePhaseRef.current = status.phase
       }
@@ -51,9 +48,8 @@ export function TopBar() {
   }, [])
 
   const runUpdateAction = async () => {
-    if (updateStatus.phase === 'available') return void (await ipc.update.download())
-    if (updateStatus.phase === 'downloaded') return void (await ipc.update.install())
-    await ipc.update.check()
+    const status = await ipc.update.run() as UpdateStatus
+    if (status.phase === 'not-available') toast(status.message || '当前已是最新版本', 'success')
   }
 
   const updateLabel =
@@ -62,9 +58,9 @@ export function TopBar() {
       : updateStatus.phase === 'downloading'
         ? `${updateStatus.percent || 0}%`
         : updateStatus.phase === 'available'
-          ? '下载更新'
+          ? '立即更新'
           : updateStatus.phase === 'downloaded'
-            ? '安装更新'
+            ? '正在安装'
             : '更新'
 
   const doSearch = useMemo(
@@ -83,18 +79,7 @@ export function TopBar() {
   )
 
   const onNewNote = async () => {
-    const name = await prompt('新建文档名称', '未命名文档')
-    if (name === null) return
-    try {
-      const path = await createDoc('', name)
-      useUI.getState().setActivityView('library')
-      await refresh()
-      openTab(path)
-      setActivePath(path)
-      focusOrOpen('editor')
-    } catch (e) {
-      toast('新建失败:' + (e as Error).message, 'error')
-    }
+    window.dispatchEvent(new CustomEvent('moqi:open-template-picker'))
   }
 
   const openResult = (path: string) => {

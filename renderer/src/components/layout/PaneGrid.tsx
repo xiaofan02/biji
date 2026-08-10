@@ -1,45 +1,46 @@
 import { Fragment, useRef } from 'react'
 import { usePanes, type PaneNode, type SplitPane, type LeafPane, type PaneContent } from '@/store/usePanes'
-import { showContextMenu } from '@/store/useContextMenu'
+import { useUI } from '@/store/useUI'
 import { Tabs } from '@/components/layout/Tabs'
 import { DocArea } from '@/components/editor/DocArea'
 import { TerminalPanel } from '@/components/terminal/TerminalPanel'
-import { AIChat } from '@/components/ai/AIChat'
 import { WorkflowPanel } from '@/components/workflow/WorkflowPanel'
 import { Icon, type IconName } from '@/components/common/Icon'
 
 const CONTENT_META: Record<PaneContent, { label: string; icon: IconName }> = {
   editor: { label: '文档', icon: 'file-text' },
   terminal: { label: '远程终端', icon: 'terminal' },
-  ai: { label: 'AI 助手', icon: 'sparkles' },
   workflow: { label: '工作流', icon: 'workflow' }
 }
 
 function PaneContentView({ content }: { content: PaneContent }) {
   if (content === 'editor') return <DocArea />
   if (content === 'terminal') return <TerminalPanel />
-  if (content === 'workflow') return <WorkflowPanel />
-  return <AIChat />
+  return <WorkflowPanel />
 }
 
 function PaneHeader({ pane }: { pane: LeafPane }) {
   const split = usePanes((s) => s.split)
   const closeLeaf = usePanes((s) => s.closeLeaf)
   const toggleMaximize = usePanes((s) => s.toggleMaximize)
+  const openExclusive = usePanes((s) => s.openExclusive)
   const maximized = usePanes((s) => s.maximizedId === pane.id)
   const isEditor = pane.content === 'editor'
   const meta = CONTENT_META[pane.content]
 
-  const splitMenu = (dir: 'row' | 'col') => (e: React.MouseEvent) => {
-    e.stopPropagation()
-    showContextMenu(e, [
-      { label: '终端', iconName: 'terminal', onClick: () => split(pane.id, dir, 'terminal') },
-      { label: 'AI 助手', iconName: 'sparkles', onClick: () => split(pane.id, dir, 'ai') }
-    ])
-  }
-
   return (
-    <div className="pane-header">
+    <div
+      className="pane-header"
+      title="双击以单页打开"
+      onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).closest('.pane-actions button')) return
+        const ui = useUI.getState()
+        if (pane.content === 'terminal') ui.setActivityView('terminal')
+        else if (pane.content === 'workflow') ui.setActivityView('workflow')
+        else if (ui.activityView !== 'team') ui.setActivityView('library')
+        openExclusive(pane.id)
+      }}
+    >
       <div className="pane-title">
         {isEditor ? (
           <Tabs />
@@ -50,12 +51,11 @@ function PaneHeader({ pane }: { pane: LeafPane }) {
         )}
       </div>
       <div className="pane-actions">
-        <button className="icon-btn small" title="向右拆分" onClick={splitMenu('row')}>
-          <Icon name="split-h" size={15} />
-        </button>
-        <button className="icon-btn small" title="向下拆分" onClick={splitMenu('col')}>
-          <Icon name="split-v" size={15} />
-        </button>
+        {isEditor && (
+          <button className="icon-btn small" title="笔记与远程终端左右分屏" onClick={() => split(pane.id, 'row', 'terminal')}>
+            <Icon name="split-h" size={15} />
+          </button>
+        )}
         <button
           className="icon-btn small"
           title={maximized ? '还原' : '最大化(占满工作区)'}

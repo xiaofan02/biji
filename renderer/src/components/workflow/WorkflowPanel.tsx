@@ -14,6 +14,8 @@ export function WorkflowPanel() {
   const loaded = useWorkflows((s) => s.loaded)
   const upsert = useWorkflows((s) => s.upsert)
   const remove = useWorkflows((s) => s.remove)
+  const runs = useWorkflows((s) => s.runs)
+  const addRun = useWorkflows((s) => s.addRun)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hosts, setHosts] = useState<{ id: string; name: string; kind: string }[]>([])
   const [running, setRunning] = useState(false)
@@ -34,6 +36,25 @@ export function WorkflowPanel() {
 
   const newWorkflow = () => {
     const wf: Workflow = { id: crypto.randomUUID(), name: '新工作流', steps: [], createdAt: Date.now(), updatedAt: Date.now() }
+    upsert(wf)
+    setSelectedId(wf.id)
+  }
+  const newFromTemplate = (kind: string) => {
+    if (!kind) return
+    const first = hosts.find((host) => kind === 'linux-health' ? host.kind === 'ssh' : true)
+    const definitions: Record<string, { name: string; title: string; commands: string }> = {
+      'network-backup': { name: '网络设备配置备份', title: '采集运行配置', commands: 'terminal length 0\nshow running-config' },
+      'network-health': { name: '网络设备健康检查', title: '采集设备状态', commands: 'show version\nshow interfaces status\nshow ip route' },
+      'linux-health': { name: 'Linux 主机健康检查', title: '采集系统状态', commands: 'uptime\ndf -h\nfree -m\nip addr' }
+    }
+    const definition = definitions[kind]
+    if (!definition) return
+    const now = Date.now()
+    const wf: Workflow = {
+      id: crypto.randomUUID(), name: definition.name, createdAt: now, updatedAt: now,
+      steps: [{ id: crypto.randomUUID(), title: definition.title, hostId: first?.id || '', commands: definition.commands }],
+      schedule: { enabled: false, mode: 'manual' }
+    }
     upsert(wf)
     setSelectedId(wf.id)
   }
@@ -65,11 +86,17 @@ export function WorkflowPanel() {
     setRunning(true)
     setProgress({})
     setResults(null)
+    const startedAt = Date.now()
     try {
       const res = await runWorkflow(current, (stepId, status, result) =>
         setProgress((p) => ({ ...p, [stepId]: { status, result } }))
       )
       setResults(res)
+      const failed = res.filter((item) => item.error).length
+      addRun({
+        id: crypto.randomUUID(), workflowId: current.id, workflowName: current.name,
+        startedAt, finishedAt: Date.now(), status: failed === 0 ? 'success' : failed === res.length ? 'failed' : 'partial', results: res
+      })
       toast('工作流运行完成', 'success')
     } catch (e) {
       toast('运行失败:' + (e as Error).message, 'error')
@@ -128,6 +155,14 @@ export function WorkflowPanel() {
               </div>
             ))
           )}
+          {runs.length > 0 && <div className="wf-history-title">最近运行</div>}
+          {runs.slice(0, 8).map((record) => (
+            <button className="wf-history-item" key={record.id} onClick={() => { setSelectedId(record.workflowId); setResults(record.results) }}>
+              <span className={`wf-history-dot ${record.status}`} />
+              <span>{record.workflowName}</span>
+              <small>{new Date(record.finishedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -138,6 +173,12 @@ export function WorkflowPanel() {
           <>
             <div className="wf-editor-head">
               <input className="wf-name" value={current.name} onChange={(e) => patch(current, { name: e.target.value })} />
+              <select className="wf-template-select" defaultValue="" onChange={(event) => { newFromTemplate(event.target.value); event.target.value = '' }}>
+                <option value="">任务模板…</option>
+                <option value="network-backup">网络设备配置备份</option>
+                <option value="network-health">网络设备健康检查</option>
+                <option value="linux-health">Linux 健康检查</option>
+              </select>
               <button className="btn primary" onClick={run} disabled={running}>
                 <Icon name="play" size={14} /> {running ? '运行中…' : '运行'}
               </button>
@@ -148,8 +189,17 @@ export function WorkflowPanel() {
               )}
             </div>
             {hosts.length === 0 && (
-              <div className="wf-tip">尚未配置主机。请先在「设置 → SSH/Telnet 主机」添加,步骤才能选择目标设备。</div>
+              <div className="wf-tip">尚未配置主机。请先在“远程终端”中新建 SSH 或 Telnet 会话，工作流即可选择目标设备。</div>
             )}
+            <div className="wf-schedule">
+              <label><input type="checkbox" checked={!!current.schedule?.enabled} onChange={(event) => patch(current, { schedule: { ...(current.schedule || { mode: 'manual' }), enabled: event.target.checked } })} /> 定时运行</label>
+              <select value={current.schedule?.mode || 'manual'} onChange={(event) => patch(current, { schedule: { ...(current.schedule || { enabled: false }), mode: event.target.value as 'manual' | 'daily' | 'interval' } })}>
+                <option value="manual">仅手动</option><option value="daily">每天</option><option value="interval">按间隔</option>
+              </select>
+              {current.schedule?.mode === 'daily' && <input type="time" value={current.schedule.time || '22:00'} onChange={(event) => patch(current, { schedule: { ...current.schedule!, time: event.target.value } })} />}
+              {current.schedule?.mode === 'interval' && <select value={current.schedule.intervalHours || 3} onChange={(event) => patch(current, { schedule: { ...current.schedule!, intervalHours: Number(event.target.value) } })}><option value="1">每 1 小时</option><option value="3">每 3 小时</option><option value="6">每 6 小时</option><option value="12">每 12 小时</option><option value="24">每 24 小时</option></select>}
+              <span>应用运行期间自动执行，结果保存在运行记录中</span>
+            </div>
             <div className="wf-steps">
               {current.steps.map((s) => {
                 const prog = progress[s.id]

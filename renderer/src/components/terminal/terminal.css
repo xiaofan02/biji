@@ -224,6 +224,9 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.sm-host[draggable="true"] { cursor: grab; }
+.sm-host[draggable="true"]:active { cursor: grabbing; opacity: 0.72; }
+.sm-folder:has(+ *) { transition: background 100ms ease; }
 .sm-host-delete {
   flex: none;
   display: inline-flex;

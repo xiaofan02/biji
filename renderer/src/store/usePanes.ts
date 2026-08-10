@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type PaneContent = 'editor' | 'terminal' | 'ai' | 'workflow'
+export type PaneContent = 'editor' | 'terminal' | 'workflow'
 
 export interface LeafPane {
   type: 'leaf'
@@ -37,30 +37,27 @@ function findLeafByContent(node: PaneNode, content: PaneContent): LeafPane | nul
   }
   return null
 }
-function splitTree(
-  root: PaneNode,
-  leafId: string,
-  dir: 'row' | 'col',
-  content: PaneContent
-): { root: PaneNode; newId: string } {
-  const newLeaf: LeafPane = { type: 'leaf', id: nid(), content }
-  const transform = (node: PaneNode): PaneNode => {
-    if (node.type === 'leaf') {
-      if (node.id !== leafId) return node
-      return { type: 'split', id: nid(), dir, children: [node, newLeaf], sizes: [0.5, 0.5] }
-    }
-    return { ...node, children: node.children.map(transform) }
+function twoPaneLayout(content: Exclude<PaneContent, 'editor'>): { root: PaneNode; secondaryId: string } {
+  const secondaryId = nid()
+  return {
+    root: {
+      type: 'split',
+      id: nid(),
+      dir: 'row',
+      children: [
+        { type: 'leaf', id: EDITOR_ID, content: 'editor' },
+        { type: 'leaf', id: secondaryId, content }
+      ],
+      sizes: content === 'terminal' ? [0.56, 0.44] : [0.42, 0.58]
+    },
+    secondaryId
   }
-  return { root: transform(root), newId: newLeaf.id }
 }
 function removeLeaf(node: PaneNode, leafId: string): PaneNode | null {
   if (node.type === 'leaf') return node.id === leafId ? null : node
   const kids = node.children.map((c) => removeLeaf(c, leafId)).filter((c): c is PaneNode => c !== null)
   if (kids.length === 0) return null
-  // ★ 不折叠"只剩一个子"的 split(原 `if(kids.length===1) return kids[0]`):折叠会让被保留子树上提一层、
-  // 改变其 React 父链 → 该子树(可能含终端/AI)被卸载重挂、连接/对话丢失(用户报"关终端把 AI 也关了")。
-  // 保留 split 包装则 children 的 key 稳定、React 复用、不重挂。残留的单子 split 渲染为占满单元格,无副作用。
-  // 数量不变(仅深层移除)时保留原 sizes 比例,否则等分。
+  if (kids.length === 1) return kids[0]
   const sizes = kids.length === node.children.length ? node.sizes : kids.map(() => 1 / kids.length)
   return { ...node, children: kids, sizes }
 }
@@ -79,6 +76,7 @@ interface PanesState {
   closeLeaf: (leafId: string) => void
   setSizes: (splitId: string, sizes: number[]) => void
   toggleMaximize: (id: string) => void
+  openExclusive: (id: string) => void
   focusOrOpen: (content: PaneContent) => void
 }
 
@@ -89,17 +87,22 @@ export const usePanes = create<PanesState>((set) => ({
 
   setActive: (id) => set({ activeId: id }),
 
-  split: (leafId, dir, content) =>
+  // 分屏只允许“笔记 + 一个远程终端”。重复点击只聚焦现有终端，
+  // 旧面板不会继续嵌套，也不会形成多个终端副本。
+  split: (_leafId, _dir, content) =>
     set((s) => {
-      const { root, newId } = splitTree(s.root, leafId, dir, content)
-      return { root, activeId: newId, maximizedId: null }
+      if (content !== 'terminal') return s
+      const existing = findLeafByContent(s.root, 'terminal')
+      if (existing) return { activeId: existing.id, maximizedId: null }
+      const { root, secondaryId } = twoPaneLayout('terminal')
+      return { root, activeId: secondaryId, maximizedId: null }
     }),
 
   closeLeaf: (leafId) =>
     set((s) => {
       if (leafId === EDITOR_ID) return s // 编辑器锚点不可关
       const root = removeLeaf(s.root, leafId)
-      if (!root) return s
+      if (!root) return { root: { type: 'leaf', id: EDITOR_ID, content: 'editor' }, activeId: EDITOR_ID, maximizedId: null }
       return {
         root,
         activeId: hasLeaf(root, s.activeId) ? s.activeId : firstLeafId(root),
@@ -111,21 +114,30 @@ export const usePanes = create<PanesState>((set) => ({
 
   toggleMaximize: (id) => set((s) => ({ maximizedId: s.maximizedId === id ? null : id, activeId: id })),
 
-  // 活动栏:把对应功能「独占整页」。已存在则直接最大化它;不存在则从编辑器锚点拆出再最大化。
-  // 独占 = maximizedId(该面板 CSS 绝对定位铺满工作区,其余面板仍挂载、只是被盖住 → 终端/AI 的连接与
-  // 对话全程保持,切换不断)。需要并排「组合」时,在面板头点「还原」回到分屏树,或用拆分按钮加面板。
+  // 双击面板标题进入单页。编辑器/工作流会真正折叠布局；终端采用保活全屏，
+  // 避免正在使用的 SSH/Telnet 会话因 React 卸载而断线。界面上不会留下分屏，
+  // 且终端永远只有一个实例；返回资料库时可恢复笔记+终端并排。
+  openExclusive: (id) =>
+    set((s) => {
+      const leaf = findLeafById(s.root, id)
+      if (!leaf) return s
+      if (leaf.content === 'terminal') return { activeId: leaf.id, maximizedId: leaf.id }
+      return { root: leaf, activeId: leaf.id, maximizedId: null }
+    }),
+
+  // 活动栏切换采用可预测的单一布局：编辑器；编辑器+终端；编辑器+工作流。
+  // 终端可取消最大化后与笔记并排，工作流作为独立页面使用。
   focusOrOpen: (content) =>
     set((s) => {
+      if (content === 'editor') {
+        const terminal = findLeafByContent(s.root, 'terminal')
+        if (terminal) return { activeId: EDITOR_ID, maximizedId: null }
+        return { root: { type: 'leaf', id: EDITOR_ID, content: 'editor' }, activeId: EDITOR_ID, maximizedId: null }
+      }
       const existing = findLeafByContent(s.root, content)
       if (existing) return { activeId: existing.id, maximizedId: existing.id }
-      const baseId = hasLeaf(s.root, EDITOR_ID)
-        ? EDITOR_ID
-        : hasLeaf(s.root, s.activeId)
-          ? s.activeId
-          : firstLeafId(s.root)
-      const dir: 'row' | 'col' = content === 'ai' ? 'row' : 'col'
-      const { root, newId } = splitTree(s.root, baseId, dir, content)
-      return { root, activeId: newId, maximizedId: newId }
+      const { root, secondaryId } = twoPaneLayout(content)
+      return { root, activeId: secondaryId, maximizedId: secondaryId }
     })
 }))
 

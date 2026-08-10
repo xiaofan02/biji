@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 export type RightPanel = 'ai' | 'terminal' | null
-export type ActivityView = 'library' | 'terminal' | 'ai' | 'workflow' | 'team'
+export type ActivityView = 'library' | 'terminal' | 'ai' | 'workflow' | 'team' | 'trash'
 
 // 标题编号显示风格(顶栏 # 控制是否显示,这里控制格式):
 // arabic-dot=1. / arabic=1 / paren=(1) / cn=一级“一、”、子级“1.1” / cn-paren=(一)。

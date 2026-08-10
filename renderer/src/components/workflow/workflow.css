@@ -215,3 +215,14 @@
 .wf-add-step {
   align-self: flex-start;
 }
+.wf-template-select { height: 30px; max-width: 170px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-input); color: var(--text-secondary); font-size: 12px; }
+.wf-history-title { margin: 14px 8px 5px; color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; }
+.wf-history-item { display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 2px 7px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); text-align: left; cursor: pointer; }
+.wf-history-item:hover { background: var(--bg-hover); }
+.wf-history-item > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.wf-history-item small { grid-column: 2; color: var(--text-tertiary); font-size: 9px; }
+.wf-history-dot { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: #2ea043; }.wf-history-dot.partial { background: #d99000; }.wf-history-dot.failed { background: #e5484d; }
+.wf-schedule { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 16px 0; padding: 9px 12px; border: 1px solid var(--border-light); border-radius: 9px; background: var(--bg-input); }
+.wf-schedule label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12px; }.wf-schedule input[type='checkbox'] { accent-color: var(--accent); }
+.wf-schedule select, .wf-schedule input[type='time'] { height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11px; }
+.wf-schedule > span { color: var(--text-tertiary); font-size: 10px; }

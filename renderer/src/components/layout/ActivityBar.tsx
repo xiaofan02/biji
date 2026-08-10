@@ -3,9 +3,8 @@ import { usePanes, type PaneContent } from '@/store/usePanes'
 import { useAuth } from '@/store/useAuth'
 import { Icon, type IconName } from '@/components/common/Icon'
 
-// 左侧活动栏:资料库开关 + 专用工作区(终端/AI/工作流) + 账号 + 设置。
-// 点击某视图 = 该功能铺满工作区(focusOrOpen 用 maximizedId 独占,其余面板不卸载、连接保持);
-// 高亮当前独占的视图。需要并排组合时,在面板头点「还原」或拆分按钮。
+// 左侧活动栏：资料库、团队笔记、远程终端和工作流。
+// AI 已统一为 Ctrl+Space 全局悬浮窗，不再占用主工作区或产生 AI 分屏。
 export function ActivityBar() {
   const activityView = useUI((s) => s.activityView)
   const setActivityView = useUI((s) => s.setActivityView)
@@ -39,12 +38,9 @@ export function ActivityBar() {
       >
         <Icon name="panel-left" size={22} />
       </button>
-      {viewItem('terminal', 'terminal', '远程终端')}
-      {viewItem('ai', 'sparkles', 'AI 助手')}
-      {viewItem('workflow', 'workflow', '自动化工作流')}
       <button
         className={`activity-item${activityView === 'team' ? ' active' : ''}`}
-        title="团队空间"
+        title="团队笔记"
         onClick={() => {
           setActivityView('team')
           focusOrOpen('editor')
@@ -52,7 +48,16 @@ export function ActivityBar() {
       >
         <Icon name="users" size={22} />
       </button>
+      {viewItem('terminal', 'terminal', '远程终端')}
+      {viewItem('workflow', 'workflow', '自动化工作流')}
       <div style={{ flex: 1 }} />
+      <button
+        className={`activity-item${activityView === 'trash' ? ' active' : ''}`}
+        title="回收站"
+        onClick={() => { setActivityView('trash'); focusOrOpen('editor') }}
+      >
+        <Icon name="trash" size={21} />
+      </button>
       <button
         className={`activity-item${authStatus === 'in' ? ' active' : ''}`}
         title={authStatus === 'in' ? `已登录:${user?.name || user?.username || ''}` : '登录团队服务器'}

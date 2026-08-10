@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 const api = {
   update: {
     getStatus: () => ipcRenderer.invoke('update:get-status'),
+    run: () => ipcRenderer.invoke('update:run'),
     check: () => ipcRenderer.invoke('update:check'),
     download: () => ipcRenderer.invoke('update:download'),
     install: () => ipcRenderer.invoke('update:install') as Promise<boolean>,
@@ -35,8 +36,19 @@ const api = {
     create: (parent: string, name: string, isDir: boolean) => ipcRenderer.invoke('fs:create', parent, name, isDir),
     rename: (oldP: string, newP: string) => ipcRenderer.invoke('fs:rename', oldP, newP),
     delete: (p: string) => ipcRenderer.invoke('fs:delete', p),
+    historyList: (p: string) => ipcRenderer.invoke('fs:history-list', p) as Promise<Array<{ id: string; createdAt: number; size: number }>>,
+    historyRead: (p: string, versionId: string) => ipcRenderer.invoke('fs:history-read', p, versionId) as Promise<string>,
+    historyRestore: (p: string, versionId: string) => ipcRenderer.invoke('fs:history-restore', p, versionId) as Promise<boolean>,
+    trashList: () => ipcRenderer.invoke('fs:trash-list') as Promise<Array<{ id: string; originalPath: string; name: string; type: 'file' | 'dir'; deletedAt: number }>>,
+    trashRestore: (id: string) => ipcRenderer.invoke('fs:trash-restore', id) as Promise<string>,
+    trashPurge: (id: string) => ipcRenderer.invoke('fs:trash-purge', id) as Promise<boolean>,
+    trashEmpty: () => ipcRenderer.invoke('fs:trash-empty') as Promise<boolean>,
     workspace: () => ipcRenderer.invoke('fs:workspace'),
     search: (q: string) => ipcRenderer.invoke('fs:search', q),
+    documentLinks: (p: string) => ipcRenderer.invoke('fs:document-links', p) as Promise<{
+      outgoing: Array<{ path: string; title: string }>
+      backlinks: Array<{ path: string; title: string }>
+    }>,
     saveImage: (notePath: string, data: Uint8Array, ext: string) => ipcRenderer.invoke('fs:save-image', notePath, data, ext)
   },
   log: {

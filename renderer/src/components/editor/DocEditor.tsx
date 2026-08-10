@@ -6,7 +6,7 @@ import {
   type DefaultReactSuggestionItem,
   type SuggestionMenuProps
 } from '@blocknote/react'
-import { filterSuggestionItems } from '@blocknote/core/extensions'
+import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { withCollaboration } from '@blocknote/core/yjs'
@@ -17,18 +17,22 @@ import './editor.css'
 import type { BijiDoc } from '@/types'
 import { ipc } from '@/lib/ipc'
 import { bijiSchema } from '@/lib/blocknote'
-import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc } from '@/lib/note'
-import { pushDoc } from '@/lib/sync'
+import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc, loadDoc } from '@/lib/note'
+import { localToVirtual, pushDoc } from '@/lib/sync'
 import { shouldSkipSave } from '@/lib/saveGuard'
 import { activeContent } from '@/lib/activeContent'
 import { useAuth } from '@/store/useAuth'
 import { useSettings } from '@/store/useSettings'
 import { useTabs } from '@/store/useTabs'
+import { useTeamSpace } from '@/store/useTeamSpace'
 import { useUI, type HeadingNumberStyle } from '@/store/useUI'
 import { toast } from '@/store/useToast'
 import { showContextMenu } from '@/store/useContextMenu'
 import { debounce } from '@/lib/util'
 import { useCollaboration, type CollaborationSession } from '@/lib/collab'
+import { DocumentLinks } from '@/components/editor/DocumentLinks'
+import { prompt } from '@/store/usePrompt'
+import { saveCustomTemplate } from '@/lib/templates'
 
 function SearchableSlashMenu({ query, ...props }: SuggestionMenuProps<DefaultReactSuggestionItem> & { query: string }) {
   const listRef = useRef<HTMLDivElement>(null)
@@ -163,14 +167,6 @@ function isBlocksEmpty(blocks: any[]): boolean {
   }
   return true
 }
-function markdownCell(value: unknown): string {
-  return String(value ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\|/g, '\\|')
-    .replace(/\r?\n/g, '<br>')
-    .trim()
-}
-
 function localPathFromFileUrl(url: string): string | null {
   try {
     const parsed = new URL(url)
@@ -228,6 +224,11 @@ export function DocEditor({
   const theme = useSettings((s) => s.theme)
   const setModified = useTabs((s) => s.setModified)
   const user = useAuth((s) => s.user)
+  const teamReadOnly = useTeamSpace((s) => {
+    const virtualPath = localToVirtual(path)
+    if (!virtualPath || !s.teamPaths.has(virtualPath)) return false
+    return user?.role === 'viewer' || s.accessByPath.get(virtualPath) === 'view'
+  })
   const outlineOpen = useUI((s) => s.outlineOpen)
   const headingNumbers = useUI((s) => s.headingNumbers)
   const headingNumberStyle = useUI((s) => s.headingNumberStyle)
@@ -288,6 +289,7 @@ export function DocEditor({
   // 落盘:把当前正文 + 标题写回本地 .bnote。force=显式保存(Ctrl+S/失焦/卸载),绕过空内容护栏。
   const saveNow = useCallback(
     async (force = false) => {
+      if (teamReadOnly) return
       if (shouldSkipSave(path)) return // 移动/删除/重命名进行中:别把内容写回旧路径(防幽灵文件复活)
       const blocks = blocksForStorage(editor.document as any[], path)
       // 空内容护栏:本来有内容的文档,自动保存绝不写成空(防加载/渲染异常清空原文);显式保存才放行
@@ -312,7 +314,7 @@ export function DocEditor({
         toast('保存失败:' + (e as Error).message, 'error')
       }
     },
-    [editor, path, seed, seedNonEmpty, setModified]
+    [editor, path, seed, seedNonEmpty, setModified, teamReadOnly]
   )
   const autosave = useMemo(() => debounce(() => void saveNow(false), 600), [saveNow])
 
@@ -525,6 +527,29 @@ export function DocEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, path])
 
+  // 历史版本恢复后，无需关闭标签页即可把磁盘中的版本重新载入当前编辑器。
+  useEffect(() => {
+    const reload = async (event: Event) => {
+      const targetPath = (event as CustomEvent<{ path?: string }>).detail?.path
+      if (targetPath !== path) return
+      try {
+        const restored = await loadDoc(path)
+        const display = blocksForDisplay(restored.blocks as any[], path)
+        editor.replaceBlocks(editor.document, display as any)
+        titleRef.current = restored.title || titleFromPath(path)
+        setTitle(titleRef.current)
+        setUpdatedAt(restored.updatedAt || Date.now())
+        dirtyRef.current = false
+        setModified(path, false)
+        pushDoc(path, restored)
+      } catch (error) {
+        toast('重新载入历史版本失败：' + (error as Error).message, 'error')
+      }
+    }
+    window.addEventListener('moqi:reload-document', reload)
+    return () => window.removeEventListener('moqi:reload-document', reload)
+  }, [editor, path, setModified])
+
   // AI「存入笔记」:把 markdown 解析成块,插入到当前文档末尾。
   // 同时只有活动文档的 DocEditor 在挂载(DocArea 只渲染 active),故只有它响应,不会重复插入。
   useEffect(() => {
@@ -619,38 +644,30 @@ export function DocEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Excel / CSV 导入：读取工作簿中的每个工作表，并转换成笔记内可继续编辑的原生表格块。
+  // Excel / CSV 导入：每个工作表保留为独立的工作表块，支持单元格式编辑。
   const importSpreadsheet = async (file: File) => {
     try {
       const XLSX = await import('xlsx')
       const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
-      const sections: string[] = []
+      const sheets: any[] = []
       let truncated = false
       for (const sheetName of workbook.SheetNames.slice(0, 12)) {
         const sheet = workbook.Sheets[sheetName]
         const source = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' })
         const rows = source.filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim()))
         if (!rows.length) continue
-        const width = Math.min(50, Math.max(...rows.map((row) => row.length), 1))
-        const limited = rows.slice(0, 1000).map((row) => Array.from({ length: width }, (_, index) => markdownCell(row[index])))
-        if (rows.length > 1000 || Math.max(...rows.map((row) => row.length), 1) > 50) truncated = true
-        const header = limited[0].map((cell, index) => cell || `列 ${index + 1}`)
-        const body = limited.slice(1)
-        if (!body.length) body.push(Array.from({ length: width }, () => ''))
-        const table = [
-          `| ${header.join(' | ')} |`,
-          `| ${header.map(() => '---').join(' | ')} |`,
-          ...body.map((row) => `| ${row.join(' | ')} |`)
-        ].join('\n')
-        sections.push(`${workbook.SheetNames.length > 1 ? `## ${markdownCell(sheetName)}\n\n` : ''}${table}`)
+        const width = Math.min(100, Math.max(...rows.map((row) => row.length), 1))
+        const limited = rows.slice(0, 2000).map((row) =>
+          Array.from({ length: width }, (_, index) => String(row[index] ?? ''))
+        )
+        if (rows.length > 2000 || Math.max(...rows.map((row) => row.length), 1) > 100) truncated = true
+        sheets.push({ type: 'spreadsheet', props: { name: sheetName, data: JSON.stringify(limited) } })
       }
-      if (!sections.length) throw new Error('工作簿中没有可导入的数据')
-      const parsed = await editor.tryParseMarkdownToBlocks(sections.join('\n\n'))
-      const display = blocksForDisplay((parsed as any[]) || [], path)
+      if (!sheets.length) throw new Error('工作簿中没有可导入的数据')
       const cursorBlock = editor.getTextCursorPosition?.().block || (editor.document as any[]).at(-1)
-      editor.insertBlocks(display as any, cursorBlock, 'after')
+      editor.insertBlocks(sheets as any, cursorBlock, 'after')
       setModified(path, true)
-      toast(truncated ? '表格已导入；超大工作表按每页 1000 行、50 列截取' : '表格已导入，可直接继续编辑', 'success')
+      toast(truncated ? '表格已导入；超大工作表按每页 2000 行、100 列截取' : '表格已导入，可像工作表一样继续编辑', 'success')
     } catch (error) {
       toast(`表格导入失败：${(error as Error).message}`, 'error')
     } finally {
@@ -734,9 +751,21 @@ export function DocEditor({
   }, [editor])
 
   const openDocumentMenu = (event: React.MouseEvent) => {
-    if ((event.target as HTMLElement).closest('input, textarea, [data-content-type="codeBlock"]')) return
+    if ((event.target as HTMLElement).closest('input, textarea')) return
     const fire = (name: string) => () => window.dispatchEvent(new CustomEvent(name))
     showContextMenu(event, [
+      { label: '历史版本', iconName: 'refresh', onClick: () => window.dispatchEvent(new CustomEvent('moqi:open-history', { detail: { path } })) },
+      { label: '发送选中内容到终端', iconName: 'terminal', onClick: () => {
+        const text = window.getSelection()?.toString().trim() || ''
+        if (!text) return toast('请先选中要发送的命令或文字', 'error')
+        window.dispatchEvent(new CustomEvent('biji:send-to-terminal', { detail: { text } }))
+      } },
+      { label: '保存为模板', iconName: 'book-open', onClick: async () => {
+        const name = await prompt('模板名称', titleRef.current || '自定义模板')
+        if (!name?.trim()) return
+        await saveCustomTemplate(name.trim(), blocksForStorage(editor.document as any[], path))
+        toast('模板已保存，下次新建笔记时可以直接使用', 'success')
+      } },
       { label: '导出 Markdown', iconName: 'file-text', onClick: fire('biji:export-md') },
       { label: '导出 PDF', iconName: 'file', onClick: fire('biji:export-pdf') },
       { label: '导出 Word', iconName: 'file', onClick: fire('biji:export-word') },
@@ -762,6 +791,7 @@ export function DocEditor({
           <input
             className="doc-title-input"
             value={title}
+            readOnly={teamReadOnly}
             placeholder="无标题"
             onChange={(e) => onTitleChange(e.target.value)}
           />
@@ -799,12 +829,27 @@ export function DocEditor({
               </span>
             )}
           </div>
-          <BlockNoteView editor={editor} theme={theme === 'dark' ? 'dark' : 'light'} onChange={onContentChange} slashMenu={false}>
+          <DocumentLinks path={path} />
+          <BlockNoteView editor={editor} editable={!teamReadOnly} theme={theme === 'dark' ? 'dark' : 'light'} onChange={onContentChange} slashMenu={false}>
             <SuggestionMenuController
               triggerCharacter="/"
               getItems={async (query) => {
                 setSlashQuery(query)
-                return filterSuggestionItems(getDefaultReactSlashMenuItems(editor), query)
+                const items: DefaultReactSuggestionItem[] = [
+                  {
+                    title: 'Excel 工作表',
+                    subtext: '带行号、列标和键盘导航的可编辑表格',
+                    aliases: ['excel', 'xlsx', 'csv', '表格', '工作表'],
+                    group: '基础块',
+                    icon: <span aria-hidden="true">▦</span>,
+                    onItemClick: () => insertOrUpdateBlockForSlashMenu(editor as any, {
+                      type: 'spreadsheet',
+                      props: { name: 'Sheet1', data: '[[""]]' }
+                    } as any)
+                  },
+                  ...getDefaultReactSlashMenuItems(editor)
+                ]
+                return filterSuggestionItems(items, query)
               }}
               suggestionMenuComponent={(props) => <SearchableSlashMenu {...props} query={slashQuery} />}
             />

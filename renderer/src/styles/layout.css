@@ -110,8 +110,9 @@
   z-index: 5;
 }
 .split-divider-row {
-  width: 6px;
+  width: 10px;
   cursor: col-resize;
+  background: color-mix(in srgb, var(--bg-sidebar) 58%, transparent);
 }
 .split-divider-col {
   height: 6px;
@@ -127,8 +128,9 @@
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 1px;
+  width: 2px;
   transform: translateX(-50%);
+  border-radius: 2px;
 }
 .split-divider-col::after {
   left: 0;
@@ -139,6 +141,9 @@
 }
 .split-divider:hover::after {
   background: var(--accent);
+}
+.split-divider-row:hover {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-sidebar));
 }
 
 /* ===== 单个面板 ===== */
@@ -249,6 +254,25 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+.recycle-bin { display: flex; flex-direction: column; gap: 7px; padding: 8px; overflow-y: auto; }
+.recycle-summary { display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 0 4px 6px; color: var(--text-tertiary); font-size: 12px; }
+.recycle-summary .btn { height: 27px; padding: 0 9px; }
+.recycle-item { display: flex; align-items: center; gap: 8px; padding: 9px; border: 1px solid var(--border-light); border-radius: 9px; background: var(--bg-canvas); }
+.recycle-info { flex: 1; min-width: 0; }
+.recycle-info strong, .recycle-info span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recycle-info strong { font-size: 12px; }
+.recycle-info span { margin-top: 3px; color: var(--text-tertiary); font-size: 10px; }
+.recycle-item .btn { height: 27px; padding: 0 9px; }
+.recycle-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 42px 12px; color: var(--text-tertiary); text-align: center; font-size: 12px; }
+.team-members-card { width: min(680px, 92vw); overflow: hidden; }
+.team-members-sub { display: block; margin-top: 3px; color: var(--text-tertiary); font-size: 11px; }
+.team-members-list { max-height: 58vh; overflow-y: auto; padding: 10px 16px; }
+.team-member-row { display: flex; align-items: center; gap: 10px; min-height: 58px; border-bottom: 1px solid var(--border-light); }
+.team-member-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: white; font-size: 13px; font-weight: 700; }
+.team-member-info { flex: 1; min-width: 0; }.team-member-info strong, .team-member-info span { display: block; }.team-member-info strong { font-size: 13px; }.team-member-info span { margin-top: 2px; color: var(--text-tertiary); font-size: 11px; }
+.team-member-row select { width: 112px; height: 31px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-secondary); background: var(--bg-input); font-size: 12px; }
+.team-role-label { color: var(--text-secondary); font-size: 12px; }.team-members-empty { padding: 50px; text-align: center; color: var(--text-tertiary); }.team-members-note { padding: 12px 18px; border-top: 1px solid var(--border-light); color: var(--text-tertiary); font-size: 11px; }
 .icon-btn:disabled {
   cursor: wait;
   opacity: 0.65;
@@ -663,12 +687,15 @@
 }
 
 .team-tree { padding-top: 8px; }
+.team-actions { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .team-new-doc {
-  width: 100%; height: 34px; margin-bottom: 8px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  flex: 1; height: 34px; margin: 0; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--bg)); color: var(--accent);
   display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-weight: 600;
 }
 .team-new-doc:hover { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); }
+.team-folder-btn { width: 34px; height: 34px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-secondary); cursor: pointer; }
+.team-folder-btn:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: var(--accent-soft); }
 .team-sidebar-empty { flex: 1; min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-muted); }
 .tree-hint { padding: 18px 10px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
@@ -1104,6 +1131,10 @@ body.resizing * {
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-light);
+  user-select: none;
+}
+.split-cell .pane.active .pane-header {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 72%, transparent);
 }
 .modal-head h3 {
   margin: 0;
@@ -1197,3 +1228,30 @@ body.resizing * {
   color: var(--text-secondary);
   flex: none;
 }
+
+.document-permissions-card { width: min(560px, calc(100vw - 40px)); }
+.permission-scope-list { display: grid; gap: 8px; padding: 16px 20px 10px; }
+.permission-scope-option { display: flex; align-items: flex-start; gap: 11px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; background: var(--bg-secondary); }
+.permission-scope-option.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary)); }
+.permission-scope-option input { margin-top: 3px; accent-color: var(--accent); }
+.permission-scope-option span { display: grid; gap: 3px; }
+.permission-scope-option strong { font-size: 13px; color: var(--text); }
+.permission-scope-option small { font-size: 12px; line-height: 1.5; color: var(--text-tertiary); }
+.permission-member-list { margin: 4px 20px 8px; max-height: 290px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.permission-member-row { min-height: 58px; padding: 8px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.permission-member-row:last-child { border-bottom: 0; }
+.permission-member-row > input { accent-color: var(--accent); }
+.permission-member-row select { min-width: 82px; height: 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-input); color: var(--text); }
+.permission-readonly-note { margin: 8px 20px 4px; padding: 10px 12px; border-radius: 8px; color: var(--text-secondary); background: var(--bg-secondary); font-size: 12px; }
+.team-access-icon { flex: none; color: var(--text-tertiary); }
+.team-readonly-badge { flex: none; padding: 1px 5px; border-radius: 5px; background: var(--bg-secondary); color: var(--text-tertiary); font-size: 10px; }
+.template-picker-card { width: min(720px, calc(100vw - 48px)); }
+.template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 60vh; overflow: auto; padding: 18px; }
+.template-card { position: relative; display: flex; align-items: center; gap: 12px; min-height: 82px; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-secondary); color: var(--text); text-align: left; cursor: pointer; }
+.template-card:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary)); }
+.template-card-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 10px; color: var(--accent); background: var(--accent-soft); }
+.template-card > span:nth-child(2) { display: grid; gap: 5px; min-width: 0; }
+.template-card strong { font-size: 13px; }
+.template-card small { color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
+.template-delete { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 25px; height: 25px; border-radius: 6px; color: var(--text-tertiary); }
+.template-delete:hover { background: var(--bg-hover); color: #e5484d; }

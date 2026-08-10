@@ -13,6 +13,9 @@ export interface TreeNode {
   /** 云端访问范围：个人仅创建者可见，团队对所有已登录成员可见。 */
   visibility?: 'private' | 'team'
   ownerId?: string
+  /** 团队文档的开放范围及当前登录成员的有效权限。 */
+  teamAccess?: 'all' | 'restricted'
+  accessLevel?: 'view' | 'edit'
 }
 
 export interface SearchResult {
@@ -107,6 +110,22 @@ export interface Workflow {
   id: string
   name: string
   steps: WorkflowStep[]
+  schedule?: {
+    enabled: boolean
+    mode: 'manual' | 'daily' | 'interval'
+    time?: string
+    intervalHours?: number
+    lastRunAt?: number
+  }
   createdAt: number
   updatedAt: number
+}
+export interface WorkflowRunRecord {
+  id: string
+  workflowId: string
+  workflowName: string
+  startedAt: number
+  finishedAt: number
+  status: 'success' | 'partial' | 'failed'
+  results: Array<{ stepId: string; title: string; host: string; output: string; error?: string }>
 }

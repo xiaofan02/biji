@@ -24,6 +24,7 @@ const store = new Store({
     terminalFontSize: 16,
     terminalColorScheme: 'traditional',
     terminalFolders: [],
+    teamDocumentPaths: [],
     syncIntervalHours: 1,
     aiProviders: [],
     activeProvider: null,
@@ -59,6 +60,7 @@ type UpdateStatus = {
 
 let updateStatus: UpdateStatus = { phase: 'idle', currentVersion: app.getVersion() }
 let updaterReady = false
+let updateRunPromise: Promise<UpdateStatus> | null = null
 
 function setUpdateStatus(next: Partial<UpdateStatus> & Pick<UpdateStatus, 'phase'>): UpdateStatus {
   updateStatus = { currentVersion: app.getVersion(), ...next }
@@ -79,6 +81,33 @@ async function checkForAppUpdate(): Promise<UpdateStatus> {
   return updateStatus
 }
 
+async function runAppUpdate(): Promise<UpdateStatus> {
+  if (!app.isPackaged) return setUpdateStatus({ phase: 'not-available', message: '开发模式不检查更新' })
+  if (updateRunPromise) return updateRunPromise
+  updateRunPromise = (async () => {
+    try {
+      if ((updateStatus as UpdateStatus).phase === 'downloaded') {
+        setImmediate(() => autoUpdater.quitAndInstall(false, true))
+        return updateStatus
+      }
+      if (updateStatus.phase !== 'available') {
+        await checkForAppUpdate()
+      }
+      if (updateStatus.phase !== 'available') return updateStatus
+      setUpdateStatus({ phase: 'downloading', percent: 0, version: updateStatus.version, message: '正在下载更新' })
+      await autoUpdater.downloadUpdate()
+      if ((updateStatus as UpdateStatus).phase === 'downloaded') {
+        setUpdateStatus({ phase: 'downloaded', version: updateStatus.version, percent: 100, message: '下载完成，正在安装并重启' })
+        setTimeout(() => autoUpdater.quitAndInstall(false, true), 700)
+      }
+    } catch (error) {
+      setUpdateStatus({ phase: 'error', message: (error as Error).message })
+    }
+    return updateStatus
+  })().finally(() => { updateRunPromise = null })
+  return updateRunPromise
+}
+
 function setupAutoUpdater(): void {
   if (updaterReady) return
   updaterReady = true
@@ -95,7 +124,7 @@ function setupAutoUpdater(): void {
     setUpdateStatus({ phase: 'downloading', percent: Math.round(progress.percent), version: updateStatus.version })
   )
   autoUpdater.on('update-downloaded', (info) =>
-    setUpdateStatus({ phase: 'downloaded', version: info.version, percent: 100, message: '更新已下载，点击安装' })
+    setUpdateStatus({ phase: 'downloaded', version: info.version, percent: 100, message: '更新已下载，正在安装并重启' })
   )
   autoUpdater.on('error', (error) => setUpdateStatus({ phase: 'error', message: error.message }))
 
@@ -328,7 +357,7 @@ function buildMenu(): Menu {
     {
       label: '帮助',
       submenu: [
-        { label: '检查更新', click: () => void checkForAppUpdate() },
+        { label: '更新软件', click: () => void runAppUpdate() },
         { type: 'separator' },
         { label: '关于 墨启 MOQI', click: () => send('menu:about') }
       ]
@@ -340,6 +369,7 @@ function buildMenu(): Menu {
 // ============ IPC: Settings ============
 ipcMain.handle('update:get-status', () => updateStatus)
 ipcMain.handle('update:check', () => checkForAppUpdate())
+ipcMain.handle('update:run', () => runAppUpdate())
 ipcMain.handle('update:download', async () => {
   if (!app.isPackaged || updateStatus.phase !== 'available') return updateStatus
   try {
@@ -454,7 +484,7 @@ ipcMain.handle('fs:write-binary', async (_e, filePath: string, data: Uint8Array)
 // <workspace>/.biji-history/<相对路径>/<时间戳>.bnote。每文件最多每 5 分钟留一份、滚动保留最近 30 份。
 // 这是"后悔药":即使护栏/原子写都失效,或用户自己误删误清空,也能从这里找回旧版本。
 // 目录以 . 开头,walkDir 会跳过,不污染资料库树。任何异常都吞掉,绝不阻断正常保存。
-async function backupBeforeOverwrite(filePath: string): Promise<void> {
+async function backupBeforeOverwrite(filePath: string, force = false): Promise<void> {
   try {
     if (!/\.bnote$/i.test(filePath)) return
     const workspace = store.get('workspace') as string
@@ -473,7 +503,7 @@ async function backupBeforeOverwrite(filePath: string): Promise<void> {
       .filter((f) => f.endsWith('.bnote'))
       .sort()
     // 限频:最近一份在 5 分钟内则跳过,避免频繁自动保存把历史刷成秒级碎片
-    if (existing.length) {
+    if (!force && existing.length) {
       const st = await fsp.stat(join(histDir, existing[existing.length - 1])).catch(() => null)
       if (st && Date.now() - st.mtimeMs < 5 * 60 * 1000) return
     }
@@ -491,6 +521,42 @@ async function backupBeforeOverwrite(filePath: string): Promise<void> {
     /* 备份失败绝不影响正常保存 */
   }
 }
+
+function historyDirFor(filePath: string): string {
+  const workspace = store.get('workspace') as string
+  const target = workspacePath(filePath, false)
+  const rel = relative(workspace, target)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel) || !/\.bnote$/i.test(rel)) {
+    throw new Error('只能查看当前工作区内的笔记历史')
+  }
+  return join(workspace, '.biji-history', rel.replace(/\.bnote$/i, ''))
+}
+
+ipcMain.handle('fs:history-list', async (_e, filePath: string) => {
+  const dir = historyDirFor(filePath)
+  const names = (await fsp.readdir(dir).catch(() => [] as string[])).filter((name) => /^\d{8}-\d{6}\.bnote$/.test(name)).sort().reverse()
+  return Promise.all(names.map(async (name) => {
+    const stat = await fsp.stat(join(dir, name))
+    return { id: name, createdAt: stat.mtimeMs, size: stat.size }
+  }))
+})
+
+ipcMain.handle('fs:history-read', async (_e, filePath: string, versionId: string) => {
+  if (!/^\d{8}-\d{6}\.bnote$/.test(versionId)) throw new Error('无效的历史版本')
+  return fsp.readFile(join(historyDirFor(filePath), versionId), 'utf-8')
+})
+
+ipcMain.handle('fs:history-restore', async (_e, filePath: string, versionId: string) => {
+  if (!/^\d{8}-\d{6}\.bnote$/.test(versionId)) throw new Error('无效的历史版本')
+  const target = workspacePath(filePath, false)
+  const content = await fsp.readFile(join(historyDirFor(filePath), versionId), 'utf-8')
+  JSON.parse(content) // 恢复前验证备份没有损坏
+  await backupBeforeOverwrite(target, true)
+  const tmp = `${target}.restore-${process.pid}-${Date.now()}`
+  await fsp.writeFile(tmp, content, 'utf-8')
+  await fsp.rename(tmp, target)
+  return true
+})
 
 ipcMain.handle('fs:write', async (_e, filePath: string, content: string) => {
   filePath = workspacePath(filePath, false)
@@ -524,8 +590,60 @@ ipcMain.handle('fs:rename', async (_e, oldPath: string, newPath: string) => {
   return true
 })
 ipcMain.handle('fs:delete', async (_e, target: string) => {
-  // 移入系统回收站(可恢复),而非永久删除
-  await shell.trashItem(workspacePath(target, false))
+  const workspace = store.get('workspace') as string
+  const source = workspacePath(target, false)
+  const rel = relative(workspace, source)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('只能删除当前工作区内的内容')
+  const stat = await fsp.stat(source)
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  const itemDir = join(workspace, '.moqi-trash', id)
+  await fsp.mkdir(itemDir, { recursive: true })
+  await fsp.writeFile(join(itemDir, 'meta.json'), JSON.stringify({
+    id,
+    originalPath: rel.replace(/\\/g, '/'),
+    name: rel.split(/[\\/]/).pop() || rel,
+    type: stat.isDirectory() ? 'dir' : 'file',
+    deletedAt: Date.now()
+  }), 'utf-8')
+  await fsp.rename(source, join(itemDir, 'payload'))
+  return true
+})
+ipcMain.handle('fs:trash-list', async () => {
+  const root = join(store.get('workspace') as string, '.moqi-trash')
+  const ids = await fsp.readdir(root).catch(() => [] as string[])
+  const items: any[] = []
+  for (const id of ids) {
+    try {
+      const meta = JSON.parse(await fsp.readFile(join(root, id, 'meta.json'), 'utf-8'))
+      items.push(meta)
+    } catch { /* 忽略不完整条目 */ }
+  }
+  return items.sort((a, b) => b.deletedAt - a.deletedAt)
+})
+ipcMain.handle('fs:trash-restore', async (_e, id: string) => {
+  if (!/^\d+-[a-z0-9]+$/i.test(id)) throw new Error('无效的回收站条目')
+  const workspace = store.get('workspace') as string
+  const itemDir = join(workspace, '.moqi-trash', id)
+  const meta = JSON.parse(await fsp.readFile(join(itemDir, 'meta.json'), 'utf-8'))
+  let target = workspacePath(join(workspace, meta.originalPath), false)
+  try {
+    await fsp.access(target)
+    const ext = extname(target)
+    const stem = ext ? target.slice(0, -ext.length) : target
+    target = `${stem}（恢复 ${new Date().toISOString().slice(0, 10)}）${ext}`
+  } catch { /* 原位置可用 */ }
+  await fsp.mkdir(dirname(target), { recursive: true })
+  await fsp.rename(join(itemDir, 'payload'), target)
+  await fsp.rm(itemDir, { recursive: true, force: true })
+  return target
+})
+ipcMain.handle('fs:trash-purge', async (_e, id: string) => {
+  if (!/^\d+-[a-z0-9]+$/i.test(id)) throw new Error('无效的回收站条目')
+  await fsp.rm(join(store.get('workspace') as string, '.moqi-trash', id), { recursive: true, force: true })
+  return true
+})
+ipcMain.handle('fs:trash-empty', async () => {
+  await fsp.rm(join(store.get('workspace') as string, '.moqi-trash'), { recursive: true, force: true })
   return true
 })
 ipcMain.handle('fs:workspace', () => store.get('workspace'))
@@ -622,6 +740,29 @@ interface SearchResult {
   match: 'filename' | 'content'
   snippet?: string
 }
+function searchableNoteText(raw: string): { title: string; text: string } {
+  try {
+    const doc = JSON.parse(raw) as { title?: string; blocks?: unknown }
+    const parts: string[] = []
+    const walk = (value: unknown): void => {
+      if (typeof value === 'string') {
+        if (!value.startsWith('data:') && value.length < 100_000) parts.push(value)
+      } else if (Array.isArray(value)) value.forEach(walk)
+      else if (value && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+          // props 里可能包含表格单元格等真实笔记内容，不能整体跳过；
+          // 只忽略结构元数据和附件地址，避免 Base64/路径污染搜索结果。
+          if (!['id', 'type', 'styles', 'url'].includes(key)) walk(child)
+        }
+      }
+    }
+    walk(doc.blocks)
+    return { title: String(doc.title || ''), text: parts.join('\n') }
+  } catch {
+    return { title: '', text: raw }
+  }
+}
+
 async function searchRecursive(dir: string, needle: string, results: SearchResult[]): Promise<void> {
   let entries: fs.Dirent[]
   try {
@@ -635,17 +776,20 @@ async function searchRecursive(dir: string, needle: string, results: SearchResul
     if (entry.isDirectory()) {
       await searchRecursive(full, needle, results)
     } else {
-      if (entry.name.toLowerCase().includes(needle)) {
-        results.push({ path: full, name: entry.name, match: 'filename' })
-        continue
-      }
       try {
-        const text = await fsp.readFile(full, 'utf-8')
+        const raw = await fsp.readFile(full, 'utf-8')
+        const note = entry.name.toLowerCase().endsWith('.bnote') ? searchableNoteText(raw) : { title: '', text: raw }
+        const displayName = note.title || entry.name.replace(/\.bnote$/i, '')
+        if (entry.name.toLowerCase().includes(needle) || note.title.toLowerCase().includes(needle)) {
+          results.push({ path: full, name: displayName, match: 'filename' })
+          continue
+        }
+        const text = note.text
         const idx = text.toLowerCase().indexOf(needle)
         if (idx >= 0) {
           const start = Math.max(0, idx - 30)
           const end = Math.min(text.length, idx + needle.length + 50)
-          results.push({ path: full, name: entry.name, match: 'content', snippet: text.slice(start, end).replace(/\s+/g, ' ') })
+          results.push({ path: full, name: displayName, match: 'content', snippet: text.slice(start, end).replace(/\s+/g, ' ') })
         }
       } catch {
         /* 二进制等读取失败忽略 */
@@ -676,6 +820,38 @@ ipcMain.handle('sys:open-path', async (_e, p: string) => {
   const error = await shell.openPath(target)
   if (error) throw new Error(error)
   return true
+})
+
+type NoteLinkItem = { path: string; title: string }
+async function collectNotes(dir: string, notes: Array<NoteLinkItem & { text: string }>): Promise<void> {
+  let entries: fs.Dirent[]
+  try { entries = await fsp.readdir(dir, { withFileTypes: true }) } catch { return }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) await collectNotes(full, notes)
+    else if (entry.name.toLowerCase().endsWith('.bnote')) {
+      try {
+        const note = searchableNoteText(await fsp.readFile(full, 'utf-8'))
+        notes.push({ path: full, title: note.title || entry.name.replace(/\.bnote$/i, ''), text: note.text })
+      } catch { /* ignore unreadable note */ }
+    }
+  }
+}
+ipcMain.handle('fs:document-links', async (_e, filePath: string) => {
+  const target = workspacePath(filePath, false)
+  const notes: Array<NoteLinkItem & { text: string }> = []
+  await collectNotes(store.get('workspace') as string, notes)
+  const current = notes.find((note) => note.path.toLowerCase() === target.toLowerCase())
+  if (!current) return { outgoing: [], backlinks: [] }
+  const byTitle = new Map(notes.map((note) => [note.title.trim().toLowerCase(), note]))
+  const refs = [...current.text.matchAll(/\[\[([^\]\n]+)\]\]/g)].map((match) => match[1].trim().toLowerCase())
+  const outgoing = [...new Set(refs)].map((title) => byTitle.get(title)).filter(Boolean).map((note) => ({ path: note!.path, title: note!.title }))
+  const wanted = current.title.trim().toLowerCase()
+  const backlinks = notes
+    .filter((note) => note.path !== current.path && [...note.text.matchAll(/\[\[([^\]\n]+)\]\]/g)].some((match) => match[1].trim().toLowerCase() === wanted))
+    .map((note) => ({ path: note.path, title: note.title }))
+  return { outgoing, backlinks }
 })
 ipcMain.handle('sys:open-data-file', async (_e, name: string, dataUrl: string) => {
   const match = String(dataUrl).match(/^data:[^;,]*(?:;[^;,=]+=[^;,]*)*;base64,([\s\S]+)$/i)

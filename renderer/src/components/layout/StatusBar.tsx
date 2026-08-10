@@ -3,11 +3,11 @@ import { useTabs } from '@/store/useTabs'
 import { useSettings } from '@/store/useSettings'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useAuth } from '@/store/useAuth'
-import { useSync, pushAll, pullAll, pushDoc, localToVirtual, type NoteSyncStatus, type SyncStatus } from '@/lib/sync'
+import { useSync, pushAll, pullAll, localToVirtual, type NoteSyncStatus, type SyncStatus } from '@/lib/sync'
 import { api, ApiError } from '@/lib/api'
-import { loadDoc } from '@/lib/note'
 import { toast } from '@/store/useToast'
 import { useCollaboration } from '@/lib/collab'
+import { useTeamSpace } from '@/store/useTeamSpace'
 
 // 云端同步状态文案 + 小圆点颜色(本地优先:未登录不显示,登录才出现)
 const SYNC_LABEL: Record<SyncStatus, string> = {
@@ -78,19 +78,11 @@ export function StatusBar() {
     try {
       await api.setVisibility(vpath, next)
       setAccess({ ...access, visibility: next, ownerId: user?.id })
+      useTeamSpace.getState().setTeamPath(vpath, next === 'team')
+      await useTeamSpace.getState().refresh().catch(() => undefined)
       toast(next === 'team' ? '已设为团队文档，同事可以查看并共同编辑' : '已设为个人文档，仅你可见', 'success')
     } catch (error) {
       toast('修改访问范围失败：' + (error as Error).message, 'error')
-    }
-  }
-
-  const onRetryNote = async () => {
-    if (!active || active.kind !== 'bnote' || noteSync?.status !== 'error') return
-    try {
-      pushDoc(active.path, await loadDoc(active.path))
-      toast('已重新加入上传队列', 'info')
-    } catch (e) {
-      toast('重试失败:' + (e as Error).message, 'error')
     }
   }
 
@@ -165,13 +157,13 @@ export function StatusBar() {
             </span>
           )}
           <span
-            title={noteSync?.error || (noteSync ? '当前笔记同步状态' : '云端同步状态')}
-            onClick={onRetryNote}
+            title={(noteSync?.error ? noteSync.error + ' · ' : '') + '点击打开同步中心'}
+            onClick={() => window.dispatchEvent(new Event('moqi:open-sync-center'))}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 5,
-              cursor: noteSync?.status === 'error' ? 'pointer' : 'default'
+              cursor: 'pointer'
             }}
           >
             <span

@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TreeNode } from '@/types'
 import { useWorkspace } from '@/store/useWorkspace'
 import { useTabs } from '@/store/useTabs'
 import { usePanes } from '@/store/usePanes'
 import { useUI } from '@/store/useUI'
+import { useTeamSpace } from '@/store/useTeamSpace'
 import { useSettings } from '@/store/useSettings'
 import { ipc } from '@/lib/ipc'
 import { prompt } from '@/store/usePrompt'
@@ -15,7 +16,15 @@ import { moveNode, newDocFlow, isDescendantOrSelf } from '@/lib/fileOps'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
 import { dirname, joinPath } from '@/lib/util'
 import { Icon, type IconName } from '@/components/common/Icon'
-import { relocateNode, removeNode } from '@/lib/sync'
+import { localToVirtual, relocateNode, removeNode } from '@/lib/sync'
+
+function withoutTeamNodes(nodes: TreeNode[], teamPaths: Set<string>): TreeNode[] {
+  return nodes.flatMap((node) => {
+    const virtual = localToVirtual(node.path)
+    if (virtual && teamPaths.has(virtual)) return []
+    return [{ ...node, children: node.children ? withoutTeamNodes(node.children, teamPaths) : undefined }]
+  })
+}
 
 function iconFor(node: TreeNode, open: boolean): IconName {
   if (node.type === 'dir') return open ? 'folder-open' : 'folder'
@@ -76,8 +85,8 @@ async function opDelete(node: TreeNode) {
     title: `删除「${displayName(node)}」`,
     message:
       node.type === 'dir'
-        ? '将把该文件夹及其下所有文档移入系统回收站(可恢复)。'
-        : '将把该文档移入系统回收站(可恢复)。',
+        ? '将把该文件夹及其下所有文档移入墨启回收站，可以在应用内恢复。'
+        : '将把该文档移入墨启回收站，可以在应用内恢复。',
     confirmText: '删除',
     danger: true
   })
@@ -230,12 +239,16 @@ function NodeView({ node, depth }: { node: TreeNode; depth: number }) {
 
 export function FileTree() {
   const tree = useWorkspace((s) => s.tree)
+  const teamPaths = useTeamSpace((s) => s.teamPaths)
   const expanded = useWorkspace((s) => s.expanded)
   const activePath = useWorkspace((s) => s.activePath)
   const setActivePath = useWorkspace((s) => s.setActivePath)
   const setExpanded = useWorkspace((s) => s.setExpanded)
   const openTab = useTabs((s) => s.open)
   const containerRef = useRef<HTMLDivElement>(null)
+  const personalTree = useMemo(() => withoutTeamNodes(tree, teamPaths), [tree, teamPaths])
+
+  useEffect(() => { void useTeamSpace.getState().init() }, [])
 
   // 键盘导航后把焦点行滚入可见区
   const focusPath = (p: string) => {
@@ -246,7 +259,7 @@ export function FileTree() {
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    const flat = flattenVisible(tree, expanded)
+    const flat = flattenVisible(personalTree, expanded)
     if (!flat.length) return
     const idx = flat.findIndex((r) => r.node.path === activePath)
     const cur = idx >= 0 ? flat[idx] : null
@@ -304,7 +317,7 @@ export function FileTree() {
     }
   }
 
-  if (!tree.length) {
+  if (!personalTree.length) {
     return (
       <div className="file-tree" onContextMenu={rootMenu}>
         <div className="placeholder-pane" style={{ height: 'auto', padding: '24px 12px' }}>
@@ -334,7 +347,7 @@ export function FileTree() {
         if (src) void moveNode(src, '')
       }}
     >
-      {tree.map((n) => (
+      {personalTree.map((n) => (
         <NodeView key={n.path} node={n} depth={0} />
       ))}
     </div>

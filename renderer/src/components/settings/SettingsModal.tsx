@@ -9,7 +9,7 @@ import { normalizeSSHHost } from '@/lib/hosts'
 import type { AIProvider, AIProviderType, SSHHost, TelnetHost } from '@/types'
 import './settings.css'
 
-type Tab = 'general' | 'ai' | 'ssh' | 'telnet' | 'about'
+type Tab = 'general' | 'ai' | 'about'
 
 export function SettingsModal() {
   const open = useUI((s) => s.settingsOpen)
@@ -33,8 +33,6 @@ export function SettingsModal() {
               [
                 ['general', '通用'],
                 ['ai', 'AI 大模型'],
-                ['ssh', 'SSH 主机'],
-                ['telnet', 'Telnet 主机'],
                 ['about', '关于']
               ] as [Tab, string][]
             ).map(([k, label]) => (
@@ -46,8 +44,6 @@ export function SettingsModal() {
           <div className="settings-pane">
             {tab === 'general' && <GeneralPane />}
             {tab === 'ai' && <AIPane />}
-            {tab === 'ssh' && <SSHPane />}
-            {tab === 'telnet' && <TelnetPane />}
             {tab === 'about' && <AboutPane />}
           </div>
         </div>

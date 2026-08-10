@@ -165,6 +165,25 @@ export function pushDoc(localPath: string, doc: BijiDoc): void {
   if (active()) scheduleFlush(vpath, uploadIntervalDelay())
 }
 
+// 同步中心/状态栏的人工重试：绕过定时上传间隔，立即刷新该文档。
+export async function retryNote(localPath: string): Promise<void> {
+  if (!active()) throw new Error('请先登录并启用云端同步')
+  const vpath = localToVirtual(localPath)
+  if (!vpath) throw new Error('文档不在当前工作区')
+  const doc = await loadDocForRetry(localPath)
+  pending.set(vpath, doc)
+  retryAttempts.delete(vpath)
+  useSync.getState().setNote(localPath, 'pending')
+  scheduleFlush(vpath, 0)
+}
+
+async function loadDocForRetry(localPath: string): Promise<BijiDoc> {
+  const raw = await ipc.fs.read(localPath) as string
+  const doc = JSON.parse(raw) as BijiDoc
+  if (!doc || doc.schema !== 'biji-doc' || !Array.isArray(doc.blocks)) throw new Error('本地文档格式无效')
+  return doc
+}
+
 // 设置变化时重排尚未上传的文档。0=暂停云同步；恢复后从新的间隔重新计时。
 export function configureSyncInterval(hours: number): void {
   const enabled = hours > 0

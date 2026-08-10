@@ -37,6 +37,18 @@ export async function newDocFlow(dir: string): Promise<void> {
   }
 }
 
+export async function newFolderFlow(dir: string): Promise<void> {
+  const name = await prompt('新建文件夹名称', '新建文件夹')
+  if (name === null || !name.trim()) return
+  try {
+    await ipc.fs.create(dir || useSettings.getState().workspace, name.trim(), true)
+    await useWorkspace.getState().refresh()
+    toast('文件夹已创建', 'success')
+  } catch (error) {
+    toast('新建文件夹失败：' + (error as Error).message, 'error')
+  }
+}
+
 // 低摩擦记录入口：不询问文件名，直接放入“收集箱”。用户可在稍后通过
 // 拖拽或“移动到...”整理，避免记下一条信息前先决定归档位置。
 export async function quickNoteFlow(): Promise<void> {

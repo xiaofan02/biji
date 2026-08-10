@@ -23,8 +23,14 @@ assetsRouter.post(
     const nodeId = (req.body?.nodeId as string | undefined) || null
     if (nodeId) {
       const access = await pool.query(
-        `SELECT 1 FROM nodes WHERE id=$1 AND type='file' AND (visibility='team' OR owner_id=$2)`,
-        [nodeId, req.user!.id]
+        `SELECT 1 FROM nodes n WHERE n.id=$1 AND n.type='file' AND (
+          (n.owner_id=$2 AND (n.visibility='private' OR $3<>'viewer')) OR $3='admin'
+          OR (n.visibility='team' AND n.team_access='all' AND $3<>'viewer')
+          OR ($3<>'viewer' AND EXISTS (
+            SELECT 1 FROM node_permissions np WHERE np.node_id=n.id AND np.user_id=$2 AND np.permission='edit'
+          ))
+        )`,
+        [nodeId, req.user!.id, req.user!.role]
       )
       if (!access.rowCount) throw new HttpError(403, '无权向该文档上传附件')
     }

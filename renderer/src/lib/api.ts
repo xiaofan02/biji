@@ -53,7 +53,43 @@ export interface UploadedAsset {
   url: string // 绝对地址(若服务器配了 PUBLIC_URL),否则同 path
 }
 
+export interface TeamMember {
+  id: string
+  username: string
+  name: string
+  role: 'admin' | 'editor' | 'viewer' | 'member'
+  color: string
+  createdAt: string
+}
+
+export interface DocumentPermission {
+  userId: string
+  username: string
+  name: string
+  color: string
+  permission: 'view' | 'edit'
+}
+
+export interface DocumentPermissionSettings {
+  access: 'all' | 'restricted'
+  ownerId: string | null
+  canManage: boolean
+  permissions: DocumentPermission[]
+}
+
 export const api = {
+  members: (): Promise<TeamMember[]> => jget('/api/auth/members').then((d) => d.members as TeamMember[]),
+  setMemberRole: (id: string, role: 'admin' | 'editor' | 'viewer'): Promise<void> =>
+    jsend('PUT', `/api/auth/members/${encodeURIComponent(id)}/role`, { role }).then(() => undefined),
+  disableMember: (id: string): Promise<void> =>
+    jsend('DELETE', `/api/auth/members/${encodeURIComponent(id)}`).then(() => undefined),
+  documentPermissions: (path: string): Promise<DocumentPermissionSettings> =>
+    jget('/api/nodes/permissions?path=' + encodeURIComponent(path)).then((d) => d as DocumentPermissionSettings),
+  setDocumentPermissions: (
+    path: string,
+    access: 'all' | 'restricted',
+    permissions: Array<{ userId: string; permission: 'view' | 'edit' }>
+  ): Promise<void> => jsend('PUT', '/api/nodes/permissions', { path, access, permissions }).then(() => undefined),
   tree: (): Promise<TreeNode[]> => jget('/api/tree').then((d) => d.tree as TreeNode[]),
   node: (path: string): Promise<TreeNode> =>
     jget('/api/node?path=' + encodeURIComponent(path)).then((d) => d.node as TreeNode),

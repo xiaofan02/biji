@@ -101,10 +101,42 @@ function mapBlockUrls(blocks: any[], fn: (url: string) => string): any[] {
   })
 }
 
+function tableCellText(cell: any): string {
+  const content = cell?.type === 'tableCell' ? cell.content : cell
+  if (!Array.isArray(content)) return String(content ?? '')
+  return content.map((part) => {
+    if (typeof part === 'string') return part
+    if (typeof part?.text === 'string') return part.text
+    return Array.isArray(part?.content) ? tableCellText(part.content) : ''
+  }).join('')
+}
+
+// 旧版本曾把 Excel 导入为普通富文本表格。加载时升级成工作表块，
+// 让已有文档也能获得行号、列标、选区和键盘导航；首次保存后即持久化新格式。
+function upgradeLegacyTables(blocks: any[]): any[] {
+  return blocks.map((block) => {
+    if (block?.type === 'table' && Array.isArray(block?.content?.rows)) {
+      const data = block.content.rows.map((row: any) =>
+        Array.isArray(row?.cells) ? row.cells.map(tableCellText) : []
+      )
+      return {
+        id: block.id,
+        type: 'spreadsheet',
+        props: { name: 'Sheet1', data: JSON.stringify(data.length ? data : [['']]) },
+        children: Array.isArray(block.children) ? upgradeLegacyTables(block.children) : []
+      }
+    }
+    return {
+      ...block,
+      children: Array.isArray(block?.children) ? upgradeLegacyTables(block.children) : block?.children
+    }
+  })
+}
+
 // 显示用:相对 assets/.. → 笔记目录下的绝对 file://;外链/已是绝对地址的原样保留。
 export function blocksForDisplay(blocks: any[], notePath: string): any[] {
   const dir = dirname(notePath)
-  return mapBlockUrls(blocks, (url) => {
+  return mapBlockUrls(upgradeLegacyTables(blocks), (url) => {
     if (/^(https?:|data:|blob:|file:)/i.test(url)) return url
     return fileUrlFor(joinPath(dir, url))
   })

@@ -6,8 +6,9 @@ import { useUI } from '@/store/useUI'
 import { useProviders } from '@/store/useProviders'
 import { usePanes } from '@/store/usePanes'
 import { useAuth } from '@/store/useAuth'
+import { useTeamSpace } from '@/store/useTeamSpace'
 import { ipc } from '@/lib/ipc'
-import { newDocFlow, quickNoteFlow } from '@/lib/fileOps'
+import { quickNoteFlow } from '@/lib/fileOps'
 import { normalizeSSHHost, sshHostsNeedMigration } from '@/lib/hosts'
 import { TopBar } from '@/components/layout/TopBar'
 import { ActivityBar } from '@/components/layout/ActivityBar'
@@ -25,7 +26,14 @@ import { QuickConnect } from '@/components/terminal/QuickConnect'
 import { useQuickConnect } from '@/store/useQuickConnect'
 import { LoginScreen } from '@/components/auth/LoginScreen'
 import { QuickAI } from '@/components/ai/QuickAI'
+import { HistoryModal } from '@/components/history/HistoryModal'
+import { SyncCenter } from '@/components/sync/SyncCenter'
+import { TeamMembersModal } from '@/components/team/TeamMembersModal'
+import { DocumentPermissionsModal } from '@/components/team/DocumentPermissionsModal'
+import { TemplatePickerModal } from '@/components/templates/TemplatePickerModal'
 import { configureSyncInterval, pushAll } from '@/lib/sync'
+import { runDueWorkflows } from '@/lib/workflowScheduler'
+import { useWorkflows } from '@/store/useWorkflows'
 
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
@@ -36,8 +44,10 @@ export default function App() {
   useEffect(() => {
     useSettings.getState().init()
     useAuth.getState().init() // 后台校验已存登录令牌(仅供同步/协同用);不阻塞本地界面
+    void useTeamSpace.getState().init()
     useWorkspace.getState().refresh()
     useProviders.getState().init()
+    void useWorkflows.getState().load()
     // 迁移旧版 SSH 主机字段(authMethod→auth, keyPath→privateKeyPath),否则连接时密码取不到 → "No authentication methods available"
     ;(async () => {
       const raw = (await ipc.settings.get('sshHosts')) as any[]
@@ -70,13 +80,13 @@ export default function App() {
   // 菜单事件订阅
   useEffect(() => {
     const offs = [
-      ipc.menu.on('menu:new-note', () => newDocFlow('')),
+      ipc.menu.on('menu:new-note', () => window.dispatchEvent(new CustomEvent('moqi:open-template-picker'))),
       ipc.menu.on('menu:quick-note', () => void quickNoteFlow()),
       ipc.menu.on('menu:save', () => window.dispatchEvent(new CustomEvent('biji:save'))),
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
       ipc.menu.on('menu:toggle-ai', () => {
-        useUI.getState().setActivityView('ai')
-        usePanes.getState().focusOrOpen('ai')
+        const ui = useUI.getState()
+        ui.setQuickAiOpen(!ui.quickAiOpen)
       }),
       ipc.menu.on('menu:toggle-terminal', () => {
         useUI.getState().setActivityView('terminal')
@@ -93,6 +103,13 @@ export default function App() {
       })
     ]
     return () => offs.forEach((off) => off && off())
+  }, [])
+
+  useEffect(() => {
+    const check = () => void runDueWorkflows().catch(() => undefined)
+    const initial = window.setTimeout(check, 15_000)
+    const timer = window.setInterval(check, 60_000)
+    return () => { window.clearTimeout(initial); window.clearInterval(timer) }
   }, [])
 
   // 自动保存兜底:窗口失焦 / 关闭前,若当前文档有未保存改动,立即落盘
@@ -171,6 +188,11 @@ export default function App() {
       <QuickConnect />
       <LoginScreen />
       <QuickAI />
+      <HistoryModal />
+      <SyncCenter />
+      <TeamMembersModal />
+      <DocumentPermissionsModal />
+      <TemplatePickerModal />
       <PromptDialog />
       <ConfirmDialog />
       <MoveDialog />

@@ -47,8 +47,14 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return
   }
   try {
-    req.user = verifyToken(token)
-    next()
+    const decoded = verifyToken(token)
+    void pool.query('SELECT username, display_name, role, color FROM users WHERE id=$1 AND disabled_at IS NULL', [decoded.id])
+      .then(({ rows }) => {
+        if (!rows[0]) return res.status(401).json({ error: '账号已停用或不存在' })
+        req.user = { id: decoded.id, username: rows[0].username, name: rows[0].display_name, role: rows[0].role, color: rows[0].color }
+        next()
+      })
+      .catch(next)
   } catch {
     res.status(401).json({ error: '登录已失效,请重新登录' })
   }
@@ -135,7 +141,7 @@ authRouter.post(
       return
     }
     const { rows } = await pool.query(
-      'SELECT id, username, display_name, password_hash, role, color FROM users WHERE username=$1',
+      'SELECT id, username, display_name, password_hash, role, color FROM users WHERE username=$1 AND disabled_at IS NULL',
       [username]
     )
     const row = rows[0]
@@ -157,3 +163,32 @@ authRouter.post(
 authRouter.get('/me', authMiddleware, (req, res) => {
   res.json({ user: req.user })
 })
+
+authRouter.get('/members', authMiddleware, asyncHandler(async (_req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, username, display_name, role, color, created_at
+     FROM users WHERE disabled_at IS NULL ORDER BY created_at, username`
+  )
+  res.json({ members: rows.map((row) => ({ id: row.id, username: row.username, name: row.display_name, role: row.role, color: row.color, createdAt: row.created_at })) })
+}))
+
+authRouter.put('/members/:id/role', authMiddleware, asyncHandler(async (req, res) => {
+  if (req.user!.role !== 'admin') return res.status(403).json({ error: '只有管理员可以修改成员角色' })
+  const role = String(req.body?.role || '')
+  if (!['admin', 'editor', 'viewer'].includes(role)) return res.status(400).json({ error: '无效的成员角色' })
+  if (req.params.id === req.user!.id && role !== 'admin') {
+    const admins = await pool.query("SELECT count(*)::int AS count FROM users WHERE role='admin' AND disabled_at IS NULL")
+    if (admins.rows[0].count <= 1) return res.status(400).json({ error: '至少需要保留一名管理员' })
+  }
+  const { rows } = await pool.query('UPDATE users SET role=$1 WHERE id=$2 AND disabled_at IS NULL RETURNING id', [role, req.params.id])
+  if (!rows[0]) return res.status(404).json({ error: '成员不存在' })
+  res.json({ ok: true })
+}))
+
+authRouter.delete('/members/:id', authMiddleware, asyncHandler(async (req, res) => {
+  if (req.user!.role !== 'admin') return res.status(403).json({ error: '只有管理员可以停用成员' })
+  if (req.params.id === req.user!.id) return res.status(400).json({ error: '不能停用当前登录账号' })
+  const { rows } = await pool.query('UPDATE users SET disabled_at=now() WHERE id=$1 AND disabled_at IS NULL RETURNING id', [req.params.id])
+  if (!rows[0]) return res.status(404).json({ error: '成员不存在' })
+  res.json({ ok: true })
+}))

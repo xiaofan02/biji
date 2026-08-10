@@ -19,12 +19,32 @@ export const hocuspocus = Server.configure({
   // 客户端 provider 传来的 token 在这里校验;抛错即拒绝连接。返回值成为连接上下文(后续钩子可读)。
   async onAuthenticate(data) {
     try {
-      const user = verifyToken(data.token)
+      const tokenUser = verifyToken(data.token)
       const access = await pool.query(
-        `SELECT 1 FROM nodes
-         WHERE id=$1 AND type='file' AND (visibility='team' OR owner_id=$2)`,
-        [data.documentName, user.id]
+        `SELECT u.username, u.display_name, u.color,
+          CASE
+            WHEN u.role='viewer' THEN 'viewer'
+            WHEN n.owner_id=u.id OR u.role='admin' OR n.team_access='all' OR np.permission='edit' THEN u.role
+            ELSE 'viewer'
+          END AS role
+         FROM nodes n
+         JOIN users u ON u.id=$2 AND u.disabled_at IS NULL
+         LEFT JOIN node_permissions np ON np.node_id=n.id AND np.user_id=u.id
+         WHERE n.id=$1 AND n.type='file' AND (
+           n.owner_id=$2 OR (n.visibility='team' AND (u.role='admin' OR n.team_access='all' OR np.user_id IS NOT NULL))
+         )`,
+        [data.documentName, tokenUser.id]
       )
+      const row = access.rows[0]
+      const user: AuthUser = row
+        ? {
+            id: tokenUser.id,
+            username: row.username,
+            name: row.display_name,
+            role: row.role,
+            color: row.color
+          }
+        : tokenUser
       if (!access.rowCount) throw new Error('无权访问该协作文档')
       console.log(`[collab] ✓ 鉴权通过 user=${user.username} doc=${data.documentName}`)
       return { user }
@@ -50,10 +70,25 @@ export const hocuspocus = Server.configure({
     const update = Buffer.from(Y.encodeStateAsUpdate(data.document))
     const title = extractTitle(data.document) || null
     const user = (data.context as { user?: AuthUser } | undefined)?.user ?? null
+    // Viewer connections can inspect a shared document, but never persist changes.
+    if (user?.role === 'viewer') {
+      console.warn(`[collab] viewer write ignored user=${user.username} doc=${data.documentName}`)
+      return
+    }
+    if (!user) return
     try {
       const r = await pool.query(
-        'UPDATE nodes SET ydoc=$1, title=COALESCE($2, title), updated_at=now(), updated_by=$3 WHERE id=$4',
-        [update, title, user?.id ?? null, data.documentName]
+        `UPDATE nodes n SET ydoc=$1, title=COALESCE($2, n.title), updated_at=now(), updated_by=$3
+         FROM users u
+         WHERE n.id=$4 AND u.id=$3 AND u.disabled_at IS NULL AND (
+           (n.owner_id=u.id AND (n.visibility='private' OR u.role<>'viewer'))
+           OR u.role='admin'
+           OR (n.visibility='team' AND n.team_access='all' AND u.role<>'viewer')
+           OR (u.role<>'viewer' AND EXISTS (
+             SELECT 1 FROM node_permissions np WHERE np.node_id=n.id AND np.user_id=u.id AND np.permission='edit'
+           ))
+         )`,
+        [update, title, user.id, data.documentName]
       )
       if (r.rowCount === 0) {
         // documentName 对不上任何 file 节点(节点被删/房间名错/库里没这条)→ 内容无处可存
@@ -61,7 +96,7 @@ export const hocuspocus = Server.configure({
       } else {
         console.log(`[collab] ✓ 存盘 doc=${data.documentName} title=${title ?? '(空)'} bytes=${update.length}`)
       }
-      await maybeSnapshot(data.documentName, update, user?.id ?? null)
+      if (r.rowCount) await maybeSnapshot(data.documentName, update, user.id)
     } catch (e) {
       // 关键:列缺失(如旧库无 ydoc 列)、约束冲突等都会落到这里。不打日志的话现象是「连上了但存不进」。
       console.error(`[collab] ✗ 存盘失败 doc=${data.documentName}:`, (e as Error).message)

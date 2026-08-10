@@ -9,8 +9,9 @@ import { confirm } from '@/store/useConfirm'
 import { prompt } from '@/store/usePrompt'
 import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
-import { usePanes } from '@/store/usePanes'
 import { useUI } from '@/store/useUI'
+import { usePanes } from '@/store/usePanes'
+import { useTabs } from '@/store/useTabs'
 import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
 import type { SSHHost, TelnetHost, SerialHost } from '@/types'
 import './terminal.css'
@@ -26,6 +27,7 @@ interface SessionTab {
 }
 
 let _seq = 1
+const terminalPasteTargets = new Map<string, (text: string) => void>()
 
 // 去掉 ANSI 转义/控制序列，得到适合存档的纯文本会话记录。
 // 重点处理设备分页提示 "--More--"：翻页时设备会发退格(\b)+空格来擦除该提示，
@@ -106,6 +108,11 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
   const [logging, setLogging] = useState(false)
   const [status, setStatus] = useState<'connecting' | 'connected' | 'closed'>('connecting')
   const [pasteText, setPasteText] = useState<string | null>(null)
+
+  useEffect(() => {
+    terminalPasteTargets.set(tab.key, (text) => setPasteText(text))
+    return () => { terminalPasteTargets.delete(tab.key) }
+  }, [tab.key])
 
   useEffect(() => {
     const host = hostRef.current
@@ -291,7 +298,7 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
     setPasteText(null)
   }
 
-  // 把终端内容发给 AI 提问:有选中用选中,否则用整屏输出(命令/输出/报错)。打开 AI 面板并附加。
+  // 把终端内容发给 AI 提问：有选中用选中，否则用整屏输出。AI 使用全局悬浮窗。
   const askAI = () => {
     const term = termRef.current
     if (!term) return
@@ -302,8 +309,23 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
       return
     }
     window.dispatchEvent(new CustomEvent('biji:ask-ai', { detail: { text, source: tab.name } }))
-    useUI.getState().setActivityView('ai')
-    usePanes.getState().focusOrOpen('ai')
+    useUI.getState().setQuickAiOpen(true)
+  }
+
+  const saveToNote = () => {
+    const term = termRef.current
+    if (!term) return
+    const selected = term.getSelection().trim()
+    const text = selected || readTerminalText(term)
+    if (!text) return toast('终端暂无内容可保存', 'error')
+    const tabs = useTabs.getState()
+    if (!tabs.activePath || !tabs.tabs.some((item) => item.path === tabs.activePath && item.kind === 'bnote')) {
+      return toast('请先打开一篇笔记，再保存终端内容', 'error')
+    }
+    const safe = text.replace(/```/g, '``\\`')
+    window.dispatchEvent(new CustomEvent('biji:save-to-note', {
+      detail: { markdown: `## 终端记录：${tab.name}\n\n\`\`\`shell\n${safe}\n\`\`\`` }
+    }))
   }
 
   return (
@@ -321,6 +343,9 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
           title="把选中内容(没选中则整屏输出)发给 AI 提问"
         >
           <Icon name="sparkles" size={13} /> 问 AI
+        </button>
+        <button className="btn term-note-btn" onClick={saveToNote} title="把选中内容（无选中则整屏）插入当前笔记">
+          <Icon name="file-plus" size={13} /> 存入笔记
         </button>
         <button
           className={`btn term-log-btn${logging ? ' logging' : ''}`}
@@ -420,6 +445,7 @@ function hostAddr(h: HostLeaf): string {
   const network = h.host as SSHHost | TelnetHost
   return `${network.host}:${network.port}`
 }
+let draggedSession: HostLeaf | null = null
 
 // 递归渲染文件夹与主机行。folders 显示展开箭头;hosts 缩进对齐到箭头之后。
 function FolderNode({
@@ -429,7 +455,8 @@ function FolderNode({
   toggle,
   connected,
   onConnect,
-  onDelete
+  onDelete,
+  onMove
 }: {
   folder: TreeFolder
   depth: number
@@ -438,6 +465,7 @@ function FolderNode({
   connected: Set<string>
   onConnect: (h: HostLeaf) => void
   onDelete: (h: HostLeaf) => void
+  onMove: (h: HostLeaf, group: string) => void
 }) {
   return (
     <>
@@ -445,7 +473,25 @@ function FolderNode({
         const open = expanded.has(sub.path)
         return (
           <div key={`d:${sub.path}`}>
-            <div className="sm-row sm-folder" style={{ paddingLeft: 8 + depth * 14 }} onClick={() => toggle(sub.path)}>
+            <div
+              className="sm-row sm-folder"
+              style={{ paddingLeft: 8 + depth * 14 }}
+              onClick={() => toggle(sub.path)}
+              onDragOver={(event) => {
+                if (!draggedSession) return
+                event.preventDefault()
+                event.stopPropagation()
+                event.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(event) => {
+                if (!draggedSession) return
+                event.preventDefault()
+                event.stopPropagation()
+                const source = draggedSession
+                draggedSession = null
+                onMove(source, sub.path)
+              }}
+            >
               <span className={`sm-twisty${open ? ' open' : ''}`}>
                 <Icon name="chevron-right" size={13} />
               </span>
@@ -463,6 +509,7 @@ function FolderNode({
                 connected={connected}
                 onConnect={onConnect}
                 onDelete={onDelete}
+                onMove={onMove}
               />
             )}
           </div>
@@ -474,6 +521,13 @@ function FolderNode({
           className={`sm-row sm-host${connected.has(h.id) ? ' connected' : ''}`}
           style={{ paddingLeft: 8 + depth * 14 + 17 }}
           title={`${h.name} · ${hostAddr(h)} · ${h.kind.toUpperCase()}\n双击连接(可重复打开多个会话)`}
+          draggable
+          onDragStart={(event) => {
+            draggedSession = h
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', h.id)
+          }}
+          onDragEnd={() => { draggedSession = null }}
           onDoubleClick={() => onConnect(h)}
         >
           <span className="sm-icon">
@@ -506,6 +560,7 @@ function SessionManager({
   onImport,
   onImportFolder,
   onCreateFolder,
+  onMove,
   onExport
 }: {
   leaves: HostLeaf[]
@@ -516,6 +571,7 @@ function SessionManager({
   onImport: () => void
   onImportFolder: () => void
   onCreateFolder: () => void
+  onMove: (h: HostLeaf, group: string) => void
   onExport: () => void
 }) {
   const folders = useSettings((s) => s.terminalFolders)
@@ -573,9 +629,23 @@ function SessionManager({
           </button>
         )}
       </div>
-      <div className="sm-tree">
+      <div
+        className="sm-tree"
+        onDragOver={(event) => {
+          if (!draggedSession) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(event) => {
+          if (!draggedSession) return
+          event.preventDefault()
+          const source = draggedSession
+          draggedSession = null
+          onMove(source, '')
+        }}
+      >
         {leaves.length === 0 && folders.length === 0 ? (
-          <div className="sm-empty">尚未配置主机。请在「设置 → SSH/Telnet 主机」中添加(可填分组构建文件夹)。</div>
+          <div className="sm-empty">尚未配置会话。请使用上方“新建会话”按钮添加 SSH、Telnet 或串口连接。</div>
         ) : q ? (
           matched.length === 0 ? (
             <div className="sm-empty">无匹配主机</div>
@@ -586,6 +656,13 @@ function SessionManager({
                 className={`sm-row sm-host${connected.has(h.id) ? ' connected' : ''}`}
                 style={{ paddingLeft: 12 }}
                 title={`${h.name} · ${hostAddr(h)} · ${h.kind.toUpperCase()}`}
+                draggable
+                onDragStart={(event) => {
+                  draggedSession = h
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', h.id)
+                }}
+                onDragEnd={() => { draggedSession = null }}
                 onDoubleClick={() => onConnect(h)}
               >
                 <span className="sm-icon">
@@ -618,6 +695,7 @@ function SessionManager({
             connected={connected}
             onConnect={onConnect}
             onDelete={onDelete}
+            onMove={onMove}
           />
         )}
       </div>
@@ -672,6 +750,21 @@ export function TerminalPanel() {
     window.addEventListener('biji:terminal-hosts-changed', loadHosts)
     return () => window.removeEventListener('biji:terminal-hosts-changed', loadHosts)
   }, [])
+
+  useEffect(() => {
+    const send = (event: Event) => {
+      const text = String((event as CustomEvent<{ text?: string }>).detail?.text || '')
+      if (!text) return
+      if (!activeKey) return toast('请先打开一个终端会话', 'error')
+      const target = terminalPasteTargets.get(activeKey)
+      if (!target) return toast('当前终端还没有准备好', 'error')
+      useUI.getState().setActivityView('terminal')
+      usePanes.getState().focusOrOpen('terminal')
+      target(text)
+    }
+    window.addEventListener('biji:send-to-terminal', send)
+    return () => window.removeEventListener('biji:send-to-terminal', send)
+  }, [activeKey])
 
   const importPaths = async (paths: string[], root?: string) => {
     if (!paths.length) return
@@ -782,6 +875,18 @@ export function TerminalPanel() {
     toast('已删除保存的会话', 'success')
   }
 
+  const moveSavedHost = async (leaf: HostLeaf, group: string) => {
+    if ((leaf.group || '') === group) return
+    const key = leaf.kind === 'ssh' ? 'sshHosts' : leaf.kind === 'telnet' ? 'telnetHosts' : 'serialHosts'
+    const list = (((await ipc.settings.get(key)) as Array<{ id?: string; group?: string }>) || []).map((item) =>
+      item.id === leaf.host.id ? { ...item, group } : item
+    )
+    await ipc.settings.set(key, list)
+    loadHosts()
+    window.dispatchEvent(new CustomEvent('biji:terminal-hosts-changed'))
+    toast(group ? `会话已移动到「${group}」` : '会话已移动到根目录', 'success')
+  }
+
   const closeSession = (key: string) => {
     setTabs((prev) => {
       const next = prev.filter((t) => t.key !== key)
@@ -847,6 +952,7 @@ export function TerminalPanel() {
             onImport={() => void importSessions()}
             onImportFolder={() => void importSessionFolder()}
             onCreateFolder={() => void createFolder()}
+            onMove={(leaf, group) => void moveSavedHost(leaf, group)}
             onExport={() => void exportSessions()}
           />
         )}
