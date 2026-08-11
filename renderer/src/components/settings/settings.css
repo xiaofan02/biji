@@ -118,3 +118,18 @@ small {
   line-height: 2;
   font-size: 13px;
 }
+.setting-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.setting-switch-row > div { min-width: 0; }
+.setting-switch-row > div label { margin-bottom: 4px; }
+.setting-switch-row > input[type='checkbox'] {
+  width: 38px;
+  height: 20px;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

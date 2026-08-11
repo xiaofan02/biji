@@ -10,7 +10,6 @@ import { prompt } from '@/store/usePrompt'
 import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
 import { useUI } from '@/store/useUI'
-import { usePanes } from '@/store/usePanes'
 import { useTabs } from '@/store/useTabs'
 import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
 import type { SSHHost, TelnetHost, SerialHost } from '@/types'
@@ -26,6 +25,7 @@ interface SessionTab {
   name: string
   originId: string // 来源主机的 `${kind}:${host.id}`,用于在会话管理器里标记"已连接"
   cfg: any // ssh:{host,port,username,password,privateKeyPath,passphrase} / telnet:{host,port}
+  pendingExecute?: string
 }
 
 let _seq = 1
@@ -110,16 +110,13 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
   const [logging, setLogging] = useState(false)
   const [status, setStatus] = useState<'connecting' | 'connected' | 'closed'>('connecting')
   const [pasteText, setPasteText] = useState<string | null>(null)
+  const pendingHandledRef = useRef(false)
 
   useEffect(() => {
-    terminalPasteTargets.set(tab.key, (text, execute = false) => {
-      if (!execute) {
-        setPasteText(text)
-        return true
-      }
+    terminalPasteTargets.set(tab.key, (text, _execute = false) => {
       const session = sessionRef.current
       if (!session) {
-        toast('当前终端尚未连接，无法执行命令', 'error')
+        toast('当前终端尚未连接，无法发送命令', 'error')
         return false
       }
       const command = text.trim().replace(/\r?\n/g, '\r')
@@ -172,6 +169,11 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
         ]
         sessionRef.current = { id, kind: tab.kind, offs }
         setStatus('connected')
+        if (tab.pendingExecute && !pendingHandledRef.current) {
+          pendingHandledRef.current = true
+          const command = tab.pendingExecute.trim().replace(/\r?\n/g, '\r')
+          if (command) termWrite(tab.kind, id, command + '\r')
+        }
         fitNow()
         if (tab.kind === 'ssh') ipc.ssh.resize(id, term.cols, term.rows)
       } catch (e) {
@@ -756,6 +758,7 @@ export function TerminalPanel() {
   const [tabs, setTabs] = useState<SessionTab[]>([])
   const [activeKey, setActiveKey] = useState('')
   const [managerOpen, setManagerOpen] = useState(true)
+  const [execution, setExecution] = useState<{ text: string; target: string; save: boolean } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // 载入主机列表(SSH 主机经 normalizeSSHHost 兼容旧版 authMethod/keyPath 字段)
@@ -807,23 +810,6 @@ export function TerminalPanel() {
   useEffect(() => useAuth.subscribe((state, previous) => {
     if (state.status !== previous.status) loadHosts()
   }), [])
-
-  useEffect(() => {
-    const send = (event: Event) => {
-      const detail = (event as CustomEvent<{ text?: string; execute?: boolean }>).detail
-      const text = String(detail?.text || '')
-      if (!text) return
-      if (!activeKey) return toast('请先打开一个终端会话', 'error')
-      const target = terminalPasteTargets.get(activeKey)
-      if (!target) return toast('当前终端还没有准备好', 'error')
-      useUI.getState().setActivityView('terminal')
-      usePanes.getState().focusOrOpen('terminal')
-      const accepted = target(text, detail?.execute === true)
-      if (accepted && detail?.execute) toast('命令已发送到当前终端执行', 'success')
-    }
-    window.addEventListener('biji:send-to-terminal', send)
-    return () => window.removeEventListener('biji:send-to-terminal', send)
-  }, [activeKey])
 
   const importPaths = async (paths: string[], root?: string) => {
     if (!paths.length) return
@@ -894,14 +880,14 @@ export function TerminalPanel() {
   }
 
   // 「连接」= 为该主机新开一个会话标签(同一台设备也可开多个),不影响已有会话
-  const connectHost = async (leaf: HostLeaf) => {
+  const connectHost = async (leaf: HostLeaf, pendingExecute?: string): Promise<boolean> => {
     let cfg: any
     if (leaf.kind === 'ssh') {
       const h = leaf.host as SSHHost
       let sharedPassword = ''
       if (leaf.shared) {
         const entered = await prompt(`连接 ${h.username ? `${h.username}@` : ''}${h.host}`, '请输入你自己的登录密码（不会保存或上传）')
-        if (entered === null) return
+        if (entered === null) return false
         sharedPassword = entered
       }
       cfg = {
@@ -920,9 +906,86 @@ export function TerminalPanel() {
       cfg = { path: h.path, baudRate: h.baudRate }
     }
     const key = `t${_seq++}`
-    setTabs((prev) => [...prev, { key, kind: leaf.kind, name: leaf.name || hostAddr(leaf), originId: leaf.id, cfg }])
+    setTabs((prev) => [...prev, { key, kind: leaf.kind, name: leaf.name || hostAddr(leaf), originId: leaf.id, cfg, pendingExecute }])
     setActiveKey(key)
+    return true
   }
+
+  const executionFolders = useMemo(
+    () => allFolderPaths(buildTree(leaves, terminalFolders)),
+    [leaves, terminalFolders]
+  )
+
+  const saveExecutionRecord = (text: string, targetNames: string[]) => {
+    const tabsState = useTabs.getState()
+    if (!tabsState.activePath || !tabsState.tabs.some((item) => item.path === tabsState.activePath && item.kind === 'bnote')) {
+      toast('命令已执行，但当前没有打开可写入记录的笔记', 'error')
+      return
+    }
+    const safe = text.replace(/```/g, '``\\`')
+    const savedAt = new Date().toLocaleString('zh-CN', { hour12: false })
+    window.dispatchEvent(new CustomEvent('biji:save-to-note', {
+      detail: {
+        markdown: `## 远程执行记录\n\n> 时间：${savedAt}　目标：${targetNames.join('、')}\n\n\`\`\`shell\n${safe}\n\`\`\``
+      }
+    }))
+  }
+
+  const runSelectedExecution = async () => {
+    if (!execution) return
+    const { text, target, save } = execution
+    const targetNames: string[] = []
+    let accepted = 0
+    if (target.startsWith('tab:')) {
+      const key = target.slice(4)
+      const tab = tabs.find((item) => item.key === key)
+      const endpoint = terminalPasteTargets.get(key)
+      if (!tab || !endpoint) return toast('所选终端尚未准备好，请稍后重试', 'error')
+      if (endpoint(text, true)) {
+        accepted++
+        targetNames.push(tab.name)
+      }
+    } else {
+      const selectedLeaves = target.startsWith('folder:')
+        ? leaves.filter((leaf) => leaf.group === target.slice(7) || leaf.group.startsWith(target.slice(7) + '/'))
+        : leaves.filter((leaf) => leaf.id === target.slice(5))
+      for (const leaf of selectedLeaves) {
+        const opened = [...tabs].reverse().find((tab) => tab.originId === leaf.id)
+        const endpoint = opened ? terminalPasteTargets.get(opened.key) : undefined
+        if (opened && endpoint?.(text, true)) {
+          accepted++
+          targetNames.push(opened.name)
+        } else if (await connectHost(leaf, text)) {
+          accepted++
+          targetNames.push(leaf.name || hostAddr(leaf))
+        }
+      }
+    }
+    if (!accepted) return toast('没有可执行的目标会话', 'error')
+    if (save) saveExecutionRecord(text, targetNames)
+    setExecution(null)
+    toast(accepted === 1 ? '命令已发送执行' : `命令已发送到 ${accepted} 个会话执行`, 'success')
+  }
+
+  useEffect(() => {
+    const send = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string; execute?: boolean }>).detail
+      const text = String(detail?.text || '').trim()
+      if (!text) return
+      if (detail?.execute) {
+        const defaultTarget = activeKey ? `tab:${activeKey}` : leaves[0] ? `host:${leaves[0].id}` : ''
+        if (!defaultTarget) return toast('还没有可执行的远程会话，请先创建会话', 'error')
+        setExecution({ text, target: defaultTarget, save: false })
+        return
+      }
+      if (!activeKey) return toast('请先在右侧打开一个终端会话', 'error')
+      const endpoint = terminalPasteTargets.get(activeKey)
+      if (!endpoint) return toast('当前终端还没有准备好', 'error')
+      if (endpoint(text, true)) toast('命令已发送到右侧当前会话', 'success')
+    }
+    window.addEventListener('biji:send-to-terminal', send)
+    return () => window.removeEventListener('biji:send-to-terminal', send)
+  }, [activeKey, leaves])
 
   const shareHost = async (leaf: HostLeaf) => {
     if (useAuth.getState().status !== 'in') return toast('请先登录后再共享会话', 'error')
@@ -1121,6 +1184,52 @@ export function TerminalPanel() {
           </div>
         </div>
       </div>
+      {execution && (
+        <div className="modal-backdrop-full terminal-execute-backdrop" onClick={() => setExecution(null)}>
+          <div className="modal-card terminal-execute-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <h3>执行远程命令</h3>
+                <p>选择一个会话，或选择文件夹批量下发到其中的全部会话。</p>
+              </div>
+              <button className="icon-btn" title="取消" onClick={() => setExecution(null)}><Icon name="x" size={16} /></button>
+            </div>
+            <div className="terminal-execute-body">
+              <label>执行目标</label>
+              <select value={execution.target} onChange={(event) => setExecution({ ...execution, target: event.target.value })}>
+                {tabs.length > 0 && (
+                  <optgroup label="当前已打开会话">
+                    {tabs.map((tab) => <option key={`tab:${tab.key}`} value={`tab:${tab.key}`}>{tab.name}{tab.key === activeKey ? '（当前）' : ''}</option>)}
+                  </optgroup>
+                )}
+                {executionFolders.length > 0 && (
+                  <optgroup label="按文件夹批量执行">
+                    {executionFolders.map((folder) => (
+                      <option key={`folder:${folder}`} value={`folder:${folder}`}>📁 {folder}（{leaves.filter((leaf) => leaf.group === folder || leaf.group.startsWith(folder + '/')).length} 个会话）</option>
+                    ))}
+                  </optgroup>
+                )}
+                {leaves.length > 0 && (
+                  <optgroup label="已保存会话">
+                    {leaves.map((leaf) => <option key={`host:${leaf.id}`} value={`host:${leaf.id}`}>{leaf.name || hostAddr(leaf)}{leaf.group ? ` · ${leaf.group}` : ''}</option>)}
+                  </optgroup>
+                )}
+              </select>
+              <label>即将执行的内容</label>
+              <pre>{execution.text}</pre>
+              <label className="terminal-execute-save">
+                <input type="checkbox" checked={execution.save} onChange={(event) => setExecution({ ...execution, save: event.target.checked })} />
+                <span><strong>保存执行记录到当前笔记</strong><small>记录执行时间、目标会话和命令内容，便于审计与复盘。</small></span>
+              </label>
+              <div className="terminal-execute-warning">批量执行会依次连接文件夹中的设备并直接下发命令，请确认设备范围和命令内容无误。</div>
+            </div>
+            <div className="terminal-execute-actions">
+              <button className="btn" onClick={() => setExecution(null)}>取消</button>
+              <button className="btn primary" onClick={() => void runSelectedExecution()}>确认执行</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -308,6 +308,7 @@ export function DocEditor({
   collaboration?: CollaborationSession | null
 }) {
   const theme = useSettings((s) => s.theme)
+  const reducedLineWidth = useSettings((s) => s.reducedLineWidth)
   const setModified = useTabs((s) => s.setModified)
   const user = useAuth((s) => s.user)
   const loggedIn = useAuth((s) => s.status === 'in')
@@ -1169,7 +1170,7 @@ export function DocEditor({
             if (file) void importSpreadsheet(file)
           }}
         />
-        <div className={`doc-scroll${headingNumbers ? ' numbered' : ''}`}>
+        <div className={`doc-scroll${headingNumbers ? ' numbered' : ''}${reducedLineWidth ? '' : ' full-width'}`}>
           <input
             className="doc-title-input"
             value={title}
@@ -1424,8 +1425,8 @@ function CodeBlockCopy({ containerRef }: { containerRef: React.RefObject<HTMLDiv
       onMouseDown={(e) => e.preventDefault()}
     >
       <button type="button" onClick={copy}>{copied ? '✓ 已复制' : '复制'}</button>
-      <button type="button" onClick={() => sendToTerminal(false)}>发送</button>
-      <button type="button" className="run" onClick={() => sendToTerminal(true)} title="直接在当前活动终端执行整段命令">执行</button>
+      <button type="button" onClick={() => sendToTerminal(false)} title="直接发送到右侧当前终端会话，不改变分屏布局">发送</button>
+      <button type="button" className="run" onClick={() => sendToTerminal(true)} title="选择单个会话或会话文件夹后执行">执行</button>
     </div>
   )
 }

@@ -9,6 +9,7 @@ interface SettingsState {
   workspace: string
   theme: Theme
   fontSize: number
+  reducedLineWidth: boolean
   terminalFontSize: number
   terminalColorScheme: TerminalColorScheme
   terminalFolders: string[]
@@ -17,6 +18,7 @@ interface SettingsState {
   init: () => Promise<void>
   setTheme: (t: Theme) => Promise<void>
   setFontSize: (n: number) => Promise<void>
+  setReducedLineWidth: (enabled: boolean) => Promise<void>
   setTerminalFontSize: (n: number) => Promise<void>
   setTerminalColorScheme: (scheme: TerminalColorScheme) => Promise<void>
   setTerminalFolders: (folders: string[]) => Promise<void>
@@ -28,6 +30,7 @@ export const useSettings = create<SettingsState>((set) => ({
   workspace: '',
   theme: 'light',
   fontSize: 16,
+  reducedLineWidth: true,
   terminalFontSize: 16,
   terminalColorScheme: 'traditional',
   terminalFolders: [],
@@ -35,10 +38,11 @@ export const useSettings = create<SettingsState>((set) => ({
   loaded: false,
 
   init: async () => {
-    const [workspace, theme, fontSize, terminalFontSize, terminalColorScheme, terminalFolders, syncIntervalHours] = await Promise.all([
+    const [workspace, theme, fontSize, reducedLineWidth, terminalFontSize, terminalColorScheme, terminalFolders, syncIntervalHours] = await Promise.all([
       ipc.fs.workspace() as Promise<string>,
       ipc.settings.get('theme') as Promise<Theme>,
       ipc.settings.get('fontSize') as Promise<number>,
+      ipc.settings.get('reducedLineWidth') as Promise<boolean | undefined>,
       ipc.settings.get('terminalFontSize') as Promise<number>,
       ipc.settings.get('terminalColorScheme') as Promise<TerminalColorScheme>,
       ipc.settings.get('terminalFolders') as Promise<string[]>,
@@ -48,6 +52,7 @@ export const useSettings = create<SettingsState>((set) => ({
       workspace,
       theme: theme || 'light',
       fontSize: fontSize || 16,
+      reducedLineWidth: reducedLineWidth !== false,
       terminalFontSize: Math.min(36, Math.max(10, terminalFontSize || 16)),
       terminalColorScheme: terminalColorScheme || 'traditional',
       terminalFolders: Array.isArray(terminalFolders) ? terminalFolders : [],
@@ -68,6 +73,11 @@ export const useSettings = create<SettingsState>((set) => ({
   setFontSize: async (n) => {
     set({ fontSize: n })
     await ipc.settings.set('fontSize', n)
+  },
+
+  setReducedLineWidth: async (reducedLineWidth) => {
+    set({ reducedLineWidth })
+    await ipc.settings.set('reducedLineWidth', reducedLineWidth)
   },
 
   setTerminalFontSize: async (n) => {

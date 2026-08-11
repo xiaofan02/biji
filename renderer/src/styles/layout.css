@@ -685,6 +685,11 @@
   background: var(--accent);
   flex: none;
 }
+.doc-scroll.full-width {
+  max-width: none;
+  margin-left: 22px;
+  margin-right: 22px;
+}
 
 .team-tree { padding-top: 8px; }
 .team-actions { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }

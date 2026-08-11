@@ -57,6 +57,8 @@ function GeneralPane() {
   const setTheme = useSettings((s) => s.setTheme)
   const fontSize = useSettings((s) => s.fontSize)
   const setFontSize = useSettings((s) => s.setFontSize)
+  const reducedLineWidth = useSettings((s) => s.reducedLineWidth)
+  const setReducedLineWidth = useSettings((s) => s.setReducedLineWidth)
   const terminalFontSize = useSettings((s) => s.terminalFontSize)
   const setTerminalFontSize = useSettings((s) => s.setTerminalFontSize)
   const terminalColorScheme = useSettings((s) => s.terminalColorScheme)
@@ -101,6 +103,18 @@ function GeneralPane() {
       <div className="form-group">
         <label>编辑器字号</label>
         <input type="number" min={12} max={28} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value) || 16)} />
+      </div>
+      <div className="form-group setting-switch-row">
+        <div>
+          <label>缩减栏宽</label>
+          <small>开启后正文保持适合长文阅读的宽度；关闭后笔记会展开并充分利用窗口空间。</small>
+        </div>
+        <input
+          type="checkbox"
+          checked={reducedLineWidth}
+          onChange={(e) => void setReducedLineWidth(e.target.checked)}
+          aria-label="缩减栏宽"
+        />
       </div>
       <div className="form-group">
         <label>远程终端外观</label>
