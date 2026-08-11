@@ -25,11 +25,21 @@ interface SessionTab {
   name: string
   originId: string // 来源主机的 `${kind}:${host.id}`,用于在会话管理器里标记"已连接"
   cfg: any // ssh:{host,port,username,password,privateKeyPath,passphrase} / telnet:{host,port}
-  pendingExecute?: string
 }
 
 let _seq = 1
 const terminalPasteTargets = new Map<string, (text: string, execute?: boolean) => boolean>()
+const terminalExecutionTargets = new Map<string, (text: string) => Promise<string>>()
+
+async function waitForExecutionTarget(key: string, timeout = 15000): Promise<(text: string) => Promise<string>> {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    const target = terminalExecutionTargets.get(key)
+    if (target) return target
+    await new Promise((resolve) => window.setTimeout(resolve, 100))
+  }
+  throw new Error('终端会话初始化超时')
+}
 
 // 去掉 ANSI 转义/控制序列，得到适合存档的纯文本会话记录。
 // 重点处理设备分页提示 "--More--"：翻页时设备会发退格(\b)+空格来擦除该提示，
@@ -107,10 +117,38 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
   const fitRef = useRef<FitAddon | null>(null)
   const sessionRef = useRef<{ id: string; kind: 'ssh' | 'telnet' | 'serial'; offs: Array<() => void> } | null>(null)
   const loggingRef = useRef(false)
+  const reconnectRef = useRef<(() => void) | null>(null)
+  const collectorRef = useRef<{
+    output: string
+    idleTimer: number
+    hardTimer: number
+    resolve: (output: string) => void
+  } | null>(null)
   const [logging, setLogging] = useState(false)
   const [status, setStatus] = useState<'connecting' | 'connected' | 'closed'>('connecting')
   const [pasteText, setPasteText] = useState<string | null>(null)
-  const pendingHandledRef = useRef(false)
+
+  const finishCollection = (suffix = '') => {
+    const collector = collectorRef.current
+    if (!collector) return
+    window.clearTimeout(collector.idleTimer)
+    window.clearTimeout(collector.hardTimer)
+    collectorRef.current = null
+    collector.resolve(stripAnsi(collector.output + suffix).trim())
+  }
+
+  const waitForConnectedSession = async (timeout = 15000) => {
+    const reconnecting = !sessionRef.current
+    if (reconnecting) reconnectRef.current?.()
+    const started = Date.now()
+    while (!sessionRef.current && Date.now() - started < timeout) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    }
+    if (!sessionRef.current) throw new Error('连接设备超时，请检查地址、凭据和网络')
+    // SSH/Telnet 底层已连接后，设备提示符仍可能稍晚到达；留出短暂稳定时间再下发首条命令。
+    if (reconnecting) await new Promise((resolve) => window.setTimeout(resolve, 650))
+    return sessionRef.current
+  }
 
   useEffect(() => {
     terminalPasteTargets.set(tab.key, (text, _execute = false) => {
@@ -123,7 +161,24 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
       if (command) termWrite(session.kind, session.id, command + '\r')
       return !!command
     })
-    return () => { terminalPasteTargets.delete(tab.key) }
+    terminalExecutionTargets.set(tab.key, async (text) => {
+      const session = await waitForConnectedSession()
+      const command = text.trim().replace(/\r?\n/g, '\r')
+      if (!command) return ''
+      if (collectorRef.current) finishCollection('\n[新的执行任务已开始，上一任务停止采集]')
+      const output = await new Promise<string>((resolve) => {
+        const idleTimer = window.setTimeout(() => finishCollection(), 3000)
+        const hardTimer = window.setTimeout(() => finishCollection('\n[输出采集达到 30 秒上限]'), 30000)
+        collectorRef.current = { output: '', idleTimer, hardTimer, resolve }
+        termWrite(session.kind, session.id, command + '\r')
+      })
+      return output
+    })
+    return () => {
+      terminalPasteTargets.delete(tab.key)
+      terminalExecutionTargets.delete(tab.key)
+      finishCollection('\n[会话已关闭]')
+    }
   }, [tab.key])
 
   useEffect(() => {
@@ -133,6 +188,7 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
     let fit: FitAddon | null = null
     let disposed = false
     let openRaf = 0
+    let connecting = false
 
     const fitNow = () => {
       if (disposed || !fit || !term || host.clientWidth === 0 || host.clientHeight === 0) return
@@ -146,7 +202,9 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
     }
 
     const connectNow = async () => {
-      if (!term) return
+      if (!term || connecting || sessionRef.current) return
+      connecting = true
+      setStatus('connecting')
       term.writeln(`正在连接 ${tab.name} …`)
       try {
         const id = (await termConnect(tab.kind, tab.cfg)).id
@@ -155,32 +213,44 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
           termClose(tab.kind, id)
           return
         }
-        const offs = [
+        const offs: Array<() => void> = []
+        offs.push(
           ipc.term.onData(id, (data: string) => {
             if (disposed || !term) return
             term.write(data)
             if (loggingRef.current) ipc.log.append(id, stripAnsi(data))
+            const collector = collectorRef.current
+            if (collector) {
+              collector.output += data
+              window.clearTimeout(collector.idleTimer)
+              collector.idleTimer = window.setTimeout(() => finishCollection(), 2200)
+            }
           }),
           ipc.term.onClose(id, () => {
-            term!.writeln('\r\n\x1b[33m[连接已关闭]\x1b[0m')
+            const current = sessionRef.current
+            if (current?.id === id) {
+              current.offs.forEach((off) => off())
+              sessionRef.current = null
+            }
+            finishCollection('\n[连接已关闭]')
+            term!.writeln('\r\n\x1b[33m[连接已关闭，按 Enter 重新连接]\x1b[0m')
             setStatus('closed')
           }),
           ipc.term.onError(id, (msg: string) => term!.writeln(`\r\n\x1b[31m[错误] ${msg}\x1b[0m`))
-        ]
+        )
         sessionRef.current = { id, kind: tab.kind, offs }
+        connecting = false
         setStatus('connected')
-        if (tab.pendingExecute && !pendingHandledRef.current) {
-          pendingHandledRef.current = true
-          const command = tab.pendingExecute.trim().replace(/\r?\n/g, '\r')
-          if (command) termWrite(tab.kind, id, command + '\r')
-        }
         fitNow()
         if (tab.kind === 'ssh') ipc.ssh.resize(id, term.cols, term.rows)
       } catch (e) {
+        connecting = false
         term.writeln(`\r\n\x1b[31m连接失败: ${(e as Error).message}\x1b[0m`)
+        term.writeln('\x1b[33m[按 Enter 重试连接]\x1b[0m')
         setStatus('closed')
       }
     }
+    reconnectRef.current = () => { void connectNow() }
 
     const init = () => {
       if (term || host.clientWidth === 0 || host.clientHeight === 0) return
@@ -199,7 +269,10 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
       fitRef.current = fit
       term.onData((data) => {
         const s = sessionRef.current
-        if (!s) return
+        if (!s) {
+          if (data.includes('\r') || data.includes('\n')) void connectNow()
+          return
+        }
         termWrite(s.kind, s.id, data)
       })
       // 延到下一帧再 fit + 连接,原因有二:
@@ -241,6 +314,8 @@ function TermSession({ tab, active, colorScheme, fontSize }: { tab: SessionTab; 
 
     return () => {
       disposed = true
+      reconnectRef.current = null
+      finishCollection('\n[会话已关闭]')
       if (openRaf) cancelAnimationFrame(openRaf)
       ro.disconnect()
       host.removeEventListener('mouseup', onMouseUp)
@@ -757,9 +832,15 @@ export function TerminalPanel() {
   const [leaves, setLeaves] = useState<HostLeaf[]>([])
   const [tabs, setTabs] = useState<SessionTab[]>([])
   const [activeKey, setActiveKey] = useState('')
-  const [managerOpen, setManagerOpen] = useState(true)
+  const [managerOpen, setManagerOpen] = useState(() => localStorage.getItem('moqi:terminal-manager-open') !== 'false')
   const [execution, setExecution] = useState<{ text: string; target: string; save: boolean } | null>(null)
+  const [executionRunning, setExecutionRunning] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+  const toggleManager = () => setManagerOpen((value) => {
+    const next = !value
+    localStorage.setItem('moqi:terminal-manager-open', String(next))
+    return next
+  })
 
   // 载入主机列表(SSH 主机经 normalizeSSHHost 兼容旧版 authMethod/keyPath 字段)
   const loadHosts = () => {
@@ -880,14 +961,14 @@ export function TerminalPanel() {
   }
 
   // 「连接」= 为该主机新开一个会话标签(同一台设备也可开多个),不影响已有会话
-  const connectHost = async (leaf: HostLeaf, pendingExecute?: string): Promise<boolean> => {
+  const connectHost = async (leaf: HostLeaf): Promise<string | null> => {
     let cfg: any
     if (leaf.kind === 'ssh') {
       const h = leaf.host as SSHHost
       let sharedPassword = ''
       if (leaf.shared) {
         const entered = await prompt(`连接 ${h.username ? `${h.username}@` : ''}${h.host}`, '请输入你自己的登录密码（不会保存或上传）')
-        if (entered === null) return false
+        if (entered === null) return null
         sharedPassword = entered
       }
       cfg = {
@@ -906,9 +987,9 @@ export function TerminalPanel() {
       cfg = { path: h.path, baudRate: h.baudRate }
     }
     const key = `t${_seq++}`
-    setTabs((prev) => [...prev, { key, kind: leaf.kind, name: leaf.name || hostAddr(leaf), originId: leaf.id, cfg, pendingExecute }])
+    setTabs((prev) => [...prev, { key, kind: leaf.kind, name: leaf.name || hostAddr(leaf), originId: leaf.id, cfg }])
     setActiveKey(key)
-    return true
+    return key
   }
 
   const executionFolders = useMemo(
@@ -916,7 +997,7 @@ export function TerminalPanel() {
     [leaves, terminalFolders]
   )
 
-  const saveExecutionRecord = (text: string, targetNames: string[]) => {
+  const saveExecutionRecord = (text: string, results: Array<{ name: string; output: string; error?: string }>) => {
     const tabsState = useTabs.getState()
     if (!tabsState.activePath || !tabsState.tabs.some((item) => item.path === tabsState.activePath && item.kind === 'bnote')) {
       toast('命令已执行，但当前没有打开可写入记录的笔记', 'error')
@@ -924,47 +1005,62 @@ export function TerminalPanel() {
     }
     const safe = text.replace(/```/g, '``\\`')
     const savedAt = new Date().toLocaleString('zh-CN', { hour12: false })
+    const targetNames = results.map((result) => result.name)
+    const sections = results.map((result) => {
+      const output = (result.error ? `[执行失败] ${result.error}\n${result.output}` : result.output || '[设备未返回可记录的输出]')
+        .replace(/```/g, '``\\`')
+      return `### ${result.name}\n\n#### 执行命令\n\n\`\`\`shell\n${safe}\n\`\`\`\n\n#### 终端输出\n\n\`\`\`text\n${output}\n\`\`\``
+    }).join('\n\n')
     window.dispatchEvent(new CustomEvent('biji:save-to-note', {
       detail: {
-        markdown: `## 远程执行记录\n\n> 时间：${savedAt}　目标：${targetNames.join('、')}\n\n\`\`\`shell\n${safe}\n\`\`\``
+        markdown: `## 远程执行记录\n\n> 时间：${savedAt}　目标：${targetNames.join('、')}\n\n${sections}`
       }
     }))
   }
 
   const runSelectedExecution = async () => {
-    if (!execution) return
+    if (!execution || executionRunning) return
     const { text, target, save } = execution
-    const targetNames: string[] = []
-    let accepted = 0
-    if (target.startsWith('tab:')) {
-      const key = target.slice(4)
-      const tab = tabs.find((item) => item.key === key)
-      const endpoint = terminalPasteTargets.get(key)
-      if (!tab || !endpoint) return toast('所选终端尚未准备好，请稍后重试', 'error')
-      if (endpoint(text, true)) {
-        accepted++
-        targetNames.push(tab.name)
-      }
-    } else {
-      const selectedLeaves = target.startsWith('folder:')
-        ? leaves.filter((leaf) => leaf.group === target.slice(7) || leaf.group.startsWith(target.slice(7) + '/'))
-        : leaves.filter((leaf) => leaf.id === target.slice(5))
-      for (const leaf of selectedLeaves) {
-        const opened = [...tabs].reverse().find((tab) => tab.originId === leaf.id)
-        const endpoint = opened ? terminalPasteTargets.get(opened.key) : undefined
-        if (opened && endpoint?.(text, true)) {
-          accepted++
-          targetNames.push(opened.name)
-        } else if (await connectHost(leaf, text)) {
-          accepted++
-          targetNames.push(leaf.name || hostAddr(leaf))
+    setExecutionRunning(true)
+    const results: Array<{ name: string; output: string; error?: string }> = []
+    try {
+      if (target.startsWith('tab:')) {
+        const key = target.slice(4)
+        const tab = tabs.find((item) => item.key === key)
+        if (!tab) throw new Error('所选终端不存在')
+        try {
+          const endpoint = await waitForExecutionTarget(key)
+          results.push({ name: tab.name, output: await endpoint(text) })
+        } catch (error) {
+          results.push({ name: tab.name, output: '', error: (error as Error).message })
+        }
+      } else {
+        const selectedLeaves = target.startsWith('folder:')
+          ? leaves.filter((leaf) => leaf.group === target.slice(7) || leaf.group.startsWith(target.slice(7) + '/'))
+          : leaves.filter((leaf) => leaf.id === target.slice(5))
+        for (const leaf of selectedLeaves) {
+          const name = leaf.name || hostAddr(leaf)
+          try {
+            const opened = [...tabs].reverse().find((tab) => tab.originId === leaf.id)
+            const key = opened?.key || await connectHost(leaf)
+            if (!key) throw new Error('已取消连接')
+            const endpoint = await waitForExecutionTarget(key)
+            results.push({ name, output: await endpoint(text) })
+          } catch (error) {
+            results.push({ name, output: '', error: (error as Error).message })
+          }
         }
       }
+      if (!results.length) return toast('没有可执行的目标会话', 'error')
+      if (save) saveExecutionRecord(text, results)
+      const succeeded = results.filter((result) => !result.error).length
+      const failed = results.length - succeeded
+      setExecution(null)
+      if (failed) toast(`执行完成：${succeeded} 个成功，${failed} 个失败${save ? '，记录已写入笔记' : ''}`, 'error')
+      else toast(results.length === 1 ? `执行完成${save ? '，命令与输出已写入笔记' : ''}` : `${results.length} 个会话执行完成${save ? '，命令与输出已写入笔记' : ''}`, 'success')
+    } finally {
+      setExecutionRunning(false)
     }
-    if (!accepted) return toast('没有可执行的目标会话', 'error')
-    if (save) saveExecutionRecord(text, targetNames)
-    setExecution(null)
-    toast(accepted === 1 ? '命令已发送执行' : `命令已发送到 ${accepted} 个会话执行`, 'success')
   }
 
   useEffect(() => {
@@ -1133,12 +1229,20 @@ export function TerminalPanel() {
             onManageShare={manageSharedHost}
           />
         )}
+        <button
+          className={`term-manager-edge-toggle${managerOpen ? ' open' : ''}`}
+          title={managerOpen ? '隐藏会话管理器' : '显示会话管理器'}
+          onClick={toggleManager}
+          aria-label={managerOpen ? '隐藏会话管理器' : '显示会话管理器'}
+        >
+          <Icon name="chevron-right" size={14} style={managerOpen ? { transform: 'rotate(180deg)' } : undefined} />
+        </button>
         <div className="term-main">
           <div className="term-tabs">
             <button
               className={`icon-btn small term-mgr-toggle${managerOpen ? ' active' : ''}`}
               title={managerOpen ? '隐藏会话管理器' : '显示会话管理器'}
-              onClick={() => setManagerOpen((v) => !v)}
+              onClick={toggleManager}
             >
               <Icon name="panel-left" size={15} />
             </button>
@@ -1185,18 +1289,18 @@ export function TerminalPanel() {
         </div>
       </div>
       {execution && (
-        <div className="modal-backdrop-full terminal-execute-backdrop" onClick={() => setExecution(null)}>
+        <div className="modal-backdrop-full terminal-execute-backdrop" onClick={() => { if (!executionRunning) setExecution(null) }}>
           <div className="modal-card terminal-execute-card" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
                 <h3>执行远程命令</h3>
                 <p>选择一个会话，或选择文件夹批量下发到其中的全部会话。</p>
               </div>
-              <button className="icon-btn" title="取消" onClick={() => setExecution(null)}><Icon name="x" size={16} /></button>
+              <button className="icon-btn" title="取消" disabled={executionRunning} onClick={() => setExecution(null)}><Icon name="x" size={16} /></button>
             </div>
             <div className="terminal-execute-body">
               <label>执行目标</label>
-              <select value={execution.target} onChange={(event) => setExecution({ ...execution, target: event.target.value })}>
+              <select disabled={executionRunning} value={execution.target} onChange={(event) => setExecution({ ...execution, target: event.target.value })}>
                 {tabs.length > 0 && (
                   <optgroup label="当前已打开会话">
                     {tabs.map((tab) => <option key={`tab:${tab.key}`} value={`tab:${tab.key}`}>{tab.name}{tab.key === activeKey ? '（当前）' : ''}</option>)}
@@ -1218,14 +1322,14 @@ export function TerminalPanel() {
               <label>即将执行的内容</label>
               <pre>{execution.text}</pre>
               <label className="terminal-execute-save">
-                <input type="checkbox" checked={execution.save} onChange={(event) => setExecution({ ...execution, save: event.target.checked })} />
-                <span><strong>保存执行记录到当前笔记</strong><small>记录执行时间、目标会话和命令内容，便于审计与复盘。</small></span>
+                <input type="checkbox" disabled={executionRunning} checked={execution.save} onChange={(event) => setExecution({ ...execution, save: event.target.checked })} />
+                <span><strong>保存执行记录到当前笔记</strong><small>记录执行时间、目标会话、命令和设备返回的终端输出，便于审计与复盘。</small></span>
               </label>
               <div className="terminal-execute-warning">批量执行会依次连接文件夹中的设备并直接下发命令，请确认设备范围和命令内容无误。</div>
             </div>
             <div className="terminal-execute-actions">
-              <button className="btn" onClick={() => setExecution(null)}>取消</button>
-              <button className="btn primary" onClick={() => void runSelectedExecution()}>确认执行</button>
+              <button className="btn" disabled={executionRunning} onClick={() => setExecution(null)}>取消</button>
+              <button className="btn primary" disabled={executionRunning} onClick={() => void runSelectedExecution()}>{executionRunning ? '正在连接并执行…' : '确认执行'}</button>
             </div>
           </div>
         </div>

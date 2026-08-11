@@ -36,7 +36,7 @@ interface UIState {
 export const useUI = create<UIState>((set, get) => ({
   rightPanel: null,
   activityView: 'library',
-  sidebarCollapsed: false,
+  sidebarCollapsed: localStorage.getItem('moqi:sidebar-collapsed') === 'true',
   settingsOpen: false,
   loginOpen: false,
   quickAiOpen: false,
@@ -51,8 +51,15 @@ export const useUI = create<UIState>((set, get) => ({
     set({ rightPanel: cur === which ? null : which })
   },
   closeRightPanel: () => set({ rightPanel: null }),
-  setActivityView: (activityView) => set({ activityView, sidebarCollapsed: false }),
-  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  setActivityView: (activityView) => {
+    localStorage.setItem('moqi:sidebar-collapsed', 'false')
+    set({ activityView, sidebarCollapsed: false })
+  },
+  toggleSidebar: () => set((s) => {
+    const sidebarCollapsed = !s.sidebarCollapsed
+    localStorage.setItem('moqi:sidebar-collapsed', String(sidebarCollapsed))
+    return { sidebarCollapsed }
+  }),
   toggleOutline: () => set((s) => ({ outlineOpen: !s.outlineOpen })),
   toggleHeadingNumbers: () => set((s) => ({ headingNumbers: !s.headingNumbers })),
   setHeadingNumberStyle: (headingNumberStyle) => set({ headingNumberStyle }),

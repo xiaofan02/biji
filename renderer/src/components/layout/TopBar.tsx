@@ -20,6 +20,7 @@ type UpdateStatus = {
 
 export function TopBar() {
   const toggleSidebar = useUI((s) => s.toggleSidebar)
+  const sidebarCollapsed = useUI((s) => s.sidebarCollapsed)
   const focusOrOpen = usePanes((s) => s.focusOrOpen)
   const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   const theme = useSettings((s) => s.theme)
@@ -96,7 +97,7 @@ export function TopBar() {
 
   return (
     <header className="topbar">
-      <button className="icon-btn" title="折叠侧栏" onClick={toggleSidebar}>
+      <button className="icon-btn" title={sidebarCollapsed ? '显示资料库' : '隐藏资料库'} onClick={toggleSidebar}>
         <Icon name="panel-left" />
       </button>
       <div className="brand">

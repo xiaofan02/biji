@@ -685,6 +685,29 @@
   background: var(--accent);
   flex: none;
 }
+.sidebar-edge-toggle {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  right: 2px;
+  width: 20px;
+  height: 42px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px 0 0 8px;
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  box-shadow: -3px 0 10px color-mix(in srgb, #111 7%, transparent);
+  opacity: 0.58;
+  cursor: pointer;
+  transition: opacity .16s ease, color .16s ease, background .16s ease;
+}
+.sidebar:hover .sidebar-edge-toggle,
+.sidebar-edge-toggle:focus-visible { opacity: 1; }
+.sidebar-edge-toggle:hover { color: var(--accent); background: var(--bg-elevated); }
 .doc-scroll.full-width {
   max-width: none;
   margin-left: 22px;

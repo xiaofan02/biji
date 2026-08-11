@@ -13,6 +13,7 @@ export function Sidebar() {
   const activityView = useUI((s) => s.activityView)
   const sidebarWidth = useUI((s) => s.sidebarWidth)
   const setSidebarWidth = useUI((s) => s.setSidebarWidth)
+  const toggleSidebar = useUI((s) => s.toggleSidebar)
   const refresh = useWorkspace((s) => s.refresh)
   const [spin, setSpin] = useState(false)
   const onRefresh = () => {
@@ -42,6 +43,11 @@ export function Sidebar() {
         </button>
       </div>
       {activityView === 'team' ? <TeamSidebar /> : activityView === 'trash' ? <RecycleBin /> : <FileTree />}
+      {!collapsed && (
+        <button className="sidebar-edge-toggle" title="隐藏资料库" onClick={toggleSidebar} aria-label="隐藏资料库">
+          <Icon name="chevron-right" size={14} style={{ transform: 'rotate(180deg)' }} />
+        </button>
+      )}
       {!collapsed && (
         <Resizer dir={1} min={200} max={480} getWidth={() => useUI.getState().sidebarWidth} setWidth={setSidebarWidth} />
       )}
