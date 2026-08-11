@@ -331,7 +331,10 @@ function buildMenu(): Menu {
         { role: 'cut', label: '剪切' },
         { role: 'copy', label: '复制' },
         { role: 'paste', label: '粘贴' },
-        { role: 'selectAll', label: '全选' }
+        { role: 'selectAll', label: '全选' },
+        { type: 'separator' },
+        { label: '在当前笔记中查找', accelerator: 'CmdOrCtrl+F', click: () => send('menu:find') },
+        { label: '查找并替换', accelerator: 'CmdOrCtrl+H', click: () => send('menu:replace') }
       ]
     },
     {

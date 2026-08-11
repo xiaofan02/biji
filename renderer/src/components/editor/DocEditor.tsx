@@ -95,6 +95,70 @@ function filterSlashItems(items: DefaultReactSuggestionItem[], query: string): D
   })
 }
 
+type NoteFindMatch = { from: number; to: number }
+
+// 在每个 ProseMirror 文本块内建立“字符 -> 文档位置”映射，因此即使一个词中间
+// 有加粗、颜色等样式边界，也仍然可以作为完整关键词被查到和替换。
+function findNoteMatches(editor: any, query: string, matchCase: boolean): NoteFindMatch[] {
+  if (!query) return []
+  const doc = editor?._tiptapEditor?.state?.doc
+  if (!doc) return []
+  const needle = matchCase ? query : query.toLocaleLowerCase()
+  const matches: NoteFindMatch[] = []
+  doc.descendants((node: any, position: number) => {
+    if (!node.isTextblock) return true
+    let text = ''
+    const positions: number[] = []
+    node.descendants((child: any, relativePosition: number) => {
+      if (child.isText && child.text) {
+        for (let index = 0; index < child.text.length; index++) positions.push(position + 1 + relativePosition + index)
+        text += child.text
+      } else if (child.isInline && child.isLeaf) {
+        positions.push(position + 1 + relativePosition)
+        text += '\uFFFC'
+      }
+      return true
+    })
+    const haystack = matchCase ? text : text.toLocaleLowerCase()
+    let offset = 0
+    while (offset <= haystack.length - needle.length) {
+      const index = haystack.indexOf(needle, offset)
+      if (index < 0) break
+      const from = positions[index]
+      const endPosition = positions[index + query.length - 1]
+      if (from !== undefined && endPosition !== undefined) matches.push({ from, to: endPosition + 1 })
+      offset = index + Math.max(query.length, 1)
+    }
+    return false
+  })
+  return matches
+}
+
+function setNoteFindHighlights(editor: any, matches: NoteFindMatch[], currentIndex: number) {
+  const registry = (CSS as any).highlights
+  const HighlightClass = (window as any).Highlight
+  if (!registry || !HighlightClass) return
+  registry.delete('moqi-note-find')
+  registry.delete('moqi-note-find-current')
+  const view = editor?._tiptapEditor?.view
+  if (!view || !matches.length) return
+  const ranges = matches.flatMap((match) => {
+    try {
+      const start = view.domAtPos(match.from)
+      const end = view.domAtPos(match.to)
+      const range = new Range()
+      range.setStart(start.node, start.offset)
+      range.setEnd(end.node, end.offset)
+      return [range]
+    } catch {
+      return []
+    }
+  })
+  if (ranges.length) registry.set('moqi-note-find', new HighlightClass(...ranges))
+  const current = ranges[currentIndex]
+  if (current) registry.set('moqi-note-find-current', new HighlightClass(current))
+}
+
 interface Heading {
   id: string
   level: number
@@ -258,8 +322,17 @@ export function DocEditor({
   const [headings, setHeadings] = useState<Heading[]>([])
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null)
   const [slashQuery, setSlashQuery] = useState('')
+  const [findOpen, setFindOpen] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [replaceValue, setReplaceValue] = useState('')
+  const [findMatchCase, setFindMatchCase] = useState(false)
+  const [findMatches, setFindMatches] = useState<NoteFindMatch[]>([])
+  const [findIndex, setFindIndex] = useState(0)
+  const [findRevision, setFindRevision] = useState(0)
   const docAreaRef = useRef<HTMLDivElement>(null)
   const tableInputRef = useRef<HTMLInputElement>(null)
+  const findInputRef = useRef<HTMLInputElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
   const normalizingListsRef = useRef(false)
   const presence = useCollaboration((s) => s.documents[path])
@@ -347,6 +420,102 @@ export function DocEditor({
 
   // 本地与协作模式的 schema 相同，但 BlockNote 的条件泛型会推导成联合类型；运行时实例接口一致。
   const editor = useCreateBlockNote(editorOptions as any, [collaboration?.roomId, path]) as any
+
+  const selectFindMatch = useCallback((match: NoteFindMatch | undefined) => {
+    if (!match) return
+    const tiptap = editor?._tiptapEditor
+    if (!tiptap) return
+    tiptap.commands.setTextSelection({ from: match.from, to: match.to })
+    tiptap.commands.scrollIntoView()
+    requestAnimationFrame(() => findInputRef.current?.focus())
+  }, [editor])
+
+  const moveFindMatch = useCallback((direction: 1 | -1) => {
+    if (!findMatches.length) return
+    const next = (findIndex + direction + findMatches.length) % findMatches.length
+    setFindIndex(next)
+    selectFindMatch(findMatches[next])
+  }, [findIndex, findMatches, selectFindMatch])
+
+  const openFindPanel = useCallback((showReplace = false) => {
+    setFindOpen(true)
+    if (showReplace) setReplaceOpen(true)
+    requestAnimationFrame(() => {
+      findInputRef.current?.focus()
+      findInputRef.current?.select()
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!findOpen || !findQuery) {
+      setFindMatches([])
+      setFindIndex(0)
+      return
+    }
+    const next = findNoteMatches(editor, findQuery, findMatchCase)
+    setFindMatches(next)
+    setFindIndex((current) => {
+      const safe = next.length ? Math.min(current, next.length - 1) : 0
+      if (next.length) requestAnimationFrame(() => selectFindMatch(next[safe]))
+      return safe
+    })
+  }, [editor, findMatchCase, findOpen, findQuery, findRevision, selectFindMatch])
+
+  useEffect(() => {
+    setNoteFindHighlights(editor, findOpen ? findMatches : [], findIndex)
+    return () => {
+      const registry = (CSS as any).highlights
+      registry?.delete('moqi-note-find')
+      registry?.delete('moqi-note-find-current')
+    }
+  }, [editor, findIndex, findMatches, findOpen])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        if (event.key === 'Escape' && findOpen) {
+          event.preventDefault()
+          setFindOpen(false)
+        }
+        return
+      }
+      const key = event.key.toLocaleLowerCase()
+      if (key !== 'f' && key !== 'h') return
+      event.preventDefault()
+      event.stopPropagation()
+      openFindPanel(key === 'h')
+    }
+    const onMenuFind = (event: Event) => openFindPanel(Boolean((event as CustomEvent<{ replace?: boolean }>).detail?.replace))
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('biji:find', onMenuFind)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('biji:find', onMenuFind)
+    }
+  }, [findOpen, openFindPanel])
+
+  const replaceCurrentMatch = () => {
+    if (teamReadOnly || !findMatches.length) return
+    const match = findMatches[findIndex]
+    const tiptap = editor?._tiptapEditor
+    if (!match || !tiptap) return
+    tiptap.view.dispatch(tiptap.state.tr.insertText(replaceValue, match.from, match.to))
+    setFindRevision((value) => value + 1)
+  }
+
+  const replaceAllMatches = () => {
+    if (teamReadOnly || !findMatches.length) return
+    const tiptap = editor?._tiptapEditor
+    if (!tiptap) return
+    let transaction = tiptap.state.tr
+    for (let index = findMatches.length - 1; index >= 0; index--) {
+      const match = findMatches[index]
+      transaction = transaction.insertText(replaceValue, match.from, match.to)
+    }
+    tiptap.view.dispatch(transaction)
+    setFindRevision((value) => value + 1)
+    toast(`已替换 ${findMatches.length} 处内容`, 'success')
+  }
 
   // 落盘:把当前正文 + 标题写回本地 .bnote。force=显式保存(Ctrl+S/失焦/卸载),绕过空内容护栏。
   const saveNow = useCallback(
@@ -437,6 +606,7 @@ export function DocEditor({
     publishContext()
     updateOutline()
     if (!normalizingListsRef.current) normalizeNumberedLists()
+    if (findOpen) setFindRevision((value) => value + 1)
   }
 
   // 卸载时兜底落盘:还有未保存改动就立即写回(被 suppressSave 抑制的旧路径会在 saveNow 内跳过)
@@ -897,6 +1067,7 @@ export function DocEditor({
     const fire = (name: string) => () => window.dispatchEvent(new CustomEvent(name))
     showContextMenu(event, [
       { label: '历史版本', iconName: 'refresh', onClick: () => window.dispatchEvent(new CustomEvent('moqi:open-history', { detail: { path } })) },
+      { label: '查找与替换  Ctrl+F', iconName: 'search', onClick: () => openFindPanel(true) },
       { label: '发送选中内容到终端', iconName: 'terminal', onClick: () => {
         if (!selectedText) return toast('请先选中要发送的命令或文字', 'error')
         window.dispatchEvent(new CustomEvent('biji:send-to-terminal', { detail: { text: selectedText } }))
@@ -939,6 +1110,54 @@ export function DocEditor({
   return (
     <div className="doc-with-outline">
       <div className="doc-area" ref={docAreaRef} onContextMenu={openDocumentMenu}>
+        {findOpen && (
+          <div className="doc-find-panel" role="dialog" aria-label="在当前笔记中查找和替换" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="doc-find-row">
+              <button type="button" className={`doc-find-expand${replaceOpen ? ' active' : ''}`} title={replaceOpen ? '收起替换' : '展开替换'} onClick={() => setReplaceOpen((value) => !value)}>⌄</button>
+              <input
+                ref={findInputRef}
+                value={findQuery}
+                placeholder="在当前笔记中查找"
+                aria-label="查找内容"
+                onChange={(event) => setFindQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    moveFindMatch(event.shiftKey ? -1 : 1)
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setFindOpen(false)
+                  }
+                }}
+              />
+              <span className="doc-find-count">{findQuery ? (findMatches.length ? `${findIndex + 1}/${findMatches.length}` : '0/0') : ''}</span>
+              <button type="button" className={findMatchCase ? 'active' : ''} title="区分大小写" onClick={() => setFindMatchCase((value) => !value)}>Aa</button>
+              <button type="button" title="上一个（Shift+Enter）" disabled={!findMatches.length} onClick={() => moveFindMatch(-1)}>↑</button>
+              <button type="button" title="下一个（Enter）" disabled={!findMatches.length} onClick={() => moveFindMatch(1)}>↓</button>
+              <button type="button" title="关闭" onClick={() => setFindOpen(false)}>×</button>
+            </div>
+            {replaceOpen && (
+              <div className="doc-find-row replace">
+                <span className="doc-find-replace-spacer" />
+                <input
+                  value={replaceValue}
+                  placeholder="替换为"
+                  aria-label="替换内容"
+                  disabled={teamReadOnly}
+                  onChange={(event) => setReplaceValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      replaceCurrentMatch()
+                    }
+                  }}
+                />
+                <button type="button" className="doc-find-action" disabled={teamReadOnly || !findMatches.length} onClick={replaceCurrentMatch}>替换</button>
+                <button type="button" className="doc-find-action wide" disabled={teamReadOnly || !findMatches.length} onClick={replaceAllMatches}>全部替换</button>
+              </div>
+            )}
+          </div>
+        )}
         <input
           ref={tableInputRef}
           className="visually-hidden-file-input"

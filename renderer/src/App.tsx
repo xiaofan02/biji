@@ -84,6 +84,8 @@ export default function App() {
       ipc.menu.on('menu:new-note', () => window.dispatchEvent(new CustomEvent('moqi:open-template-picker'))),
       ipc.menu.on('menu:quick-note', () => void quickNoteFlow()),
       ipc.menu.on('menu:save', () => window.dispatchEvent(new CustomEvent('biji:save'))),
+      ipc.menu.on('menu:find', () => window.dispatchEvent(new CustomEvent('biji:find'))),
+      ipc.menu.on('menu:replace', () => window.dispatchEvent(new CustomEvent('biji:find', { detail: { replace: true } }))),
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
       ipc.menu.on('menu:toggle-ai', () => {
         const ui = useUI.getState()

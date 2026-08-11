@@ -313,6 +313,92 @@
 .doc-area {
   position: relative;
 }
+.doc-find-panel {
+  position: absolute;
+  z-index: 85;
+  top: 12px;
+  right: 54px;
+  width: min(540px, calc(100% - 76px));
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+  backdrop-filter: blur(14px);
+}
+::highlight(moqi-note-find) {
+  color: inherit;
+  background: color-mix(in srgb, #ffd84d 58%, transparent);
+}
+::highlight(moqi-note-find-current) {
+  color: inherit;
+  background: color-mix(in srgb, #ff9f1c 72%, transparent);
+  text-decoration: underline 2px color-mix(in srgb, #c56700 75%, transparent);
+}
+.doc-find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.doc-find-row.replace { margin-top: 5px; }
+.doc-find-row > input {
+  min-width: 80px;
+  height: 30px;
+  flex: 1;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  color: var(--text);
+  background: var(--bg-input);
+  font: 13px inherit;
+}
+.doc-find-row > input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.doc-find-row > input:disabled { opacity: 0.55; }
+.doc-find-row > button {
+  height: 30px;
+  min-width: 30px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  font: 12px inherit;
+  cursor: pointer;
+}
+.doc-find-row > button:hover:not(:disabled),
+.doc-find-row > button.active {
+  color: var(--accent);
+  border-color: var(--border-light);
+  background: var(--accent-soft);
+}
+.doc-find-row > button:disabled { opacity: 0.35; cursor: default; }
+.doc-find-expand { font-size: 15px !important; transition: transform 120ms ease; }
+.doc-find-expand.active { transform: rotate(180deg); }
+.doc-find-count {
+  min-width: 40px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+.doc-find-replace-spacer { width: 30px; min-width: 30px; }
+.doc-find-row > button.doc-find-action {
+  min-width: 48px;
+  border-color: var(--border);
+  background: var(--bg-canvas);
+}
+.doc-find-row > button.doc-find-action.wide { min-width: 72px; }
+@media (max-width: 720px) {
+  .doc-find-panel { right: 10px; width: calc(100% - 20px); }
+  .doc-find-count { min-width: 32px; }
+}
 .code-insert-after {
   position: fixed;
   z-index: 70;
