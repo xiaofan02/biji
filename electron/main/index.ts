@@ -196,10 +196,16 @@ function createWindow(): void {
     }
   })
 
-  // Electron 默认关闭触摸板 pinch-to-zoom。显式开启后，Windows 触摸板双指
-  // 捏合、触摸屏手势都能缩放整个应用页面；键盘/滚轮缩放继续使用页面缩放。
-  // 限制在 50%～300%，避免误操作后界面小到无法恢复或放大到失去控制。
-  void mainWindow.webContents.setVisualZoomLevelLimits(0.5, 3)
+  // 禁用 Chromium 的“视觉缩放”：它只缩放网页画布，不重新计算窗口布局，
+  // 缩小时会把应用挤在左上角并留下大片空白。触摸板/滚轮请求改由下面的
+  // zoom-changed 转换成布局缩放，应用始终铺满整个窗口。
+  void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+  // v0.7.0 曾启用视觉缩放。升级后仅执行一次复位，修复已经被缩到左上角的窗口；
+  // 此后仍正常记忆用户设置的布局缩放比例。
+  if (!store.get('layoutZoomMigrationV1')) {
+    store.set('pageZoomFactor', 1)
+    store.set('layoutZoomMigrationV1', true)
+  }
   setPageZoom(Number(store.get('pageZoomFactor') || 1))
   mainWindow.webContents.on('zoom-changed', (event, direction) => {
     event.preventDefault()
