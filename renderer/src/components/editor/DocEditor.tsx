@@ -265,6 +265,36 @@ function localPathFromFileUrl(url: string): string | null {
   }
 }
 
+// 标题编号在编辑器中由叠加层绘制，并不属于 BlockNote 的原始内容。
+// 导出时创建一份带编号的临时块副本，让 Markdown / HTML / Word / PDF
+// 得到与笔记界面一致的标题；原文仍保持干净，避免重新打开后重复编号。
+function blocksWithExportHeadingNumbers(
+  blocks: any[],
+  enabled: boolean,
+  style: HeadingNumberStyle
+): any[] {
+  if (!enabled) return blocks
+  const numberById = computeHeadingNumbers(extractHeadings(blocks))
+
+  const decorate = (items: any[]): any[] =>
+    (items || []).map((block) => {
+      const children = Array.isArray(block?.children) ? decorate(block.children) : block?.children
+      if (block?.type !== 'heading') return { ...block, children }
+      const number = numberById.get(block.id)
+      if (!number) return { ...block, children }
+      return {
+        ...block,
+        children,
+        content: [
+          { type: 'text', text: `${formatHeadingNumber(number, style)} `, styles: {} },
+          ...(Array.isArray(block.content) ? block.content : [])
+        ]
+      }
+    })
+
+  return decorate(blocks)
+}
+
 type ListStartUpdate = { id: string; start: number | undefined }
 
 // BlockNote 默认只给相邻的有序列表连续编号；普通段落会把下一项重置为 1。
@@ -701,12 +731,16 @@ export function DocEditor({
   // 导出(Markdown / PDF / Word)。协同文档由 Hocuspocus 自动持久化,biji:save(Ctrl+S/失焦)无需落盘。
   useEffect(() => {
     const docName = () => titleRef.current || titleFromPath(path)
+    const exportBlocks = () => {
+      const stored = blocksForStorage(editor.document as any[], path) as any[]
+      return blocksWithExportHeadingNumbers(stored, headingNumbers, headingNumberStyle)
+    }
     const onSave = () => {
       void saveNow(true) // 显式保存(Ctrl+S / 失焦),立即落盘
     }
     const onExportMd = async () => {
       try {
-        const md = await editor.blocksToMarkdownLossy(blocksForStorage(editor.document as any[], path) as any)
+        const md = await editor.blocksToMarkdownLossy(exportBlocks() as any)
         const body = `# ${docName()}\n\n${md}`
         const saved = await ipc.exporter.saveText(docName() + '.md', body, [{ name: 'Markdown', extensions: ['md'] }])
         if (saved) toast('已导出 Markdown', 'success')
@@ -716,7 +750,7 @@ export function DocEditor({
     }
     const onExportPdf = async () => {
       try {
-        const inner = await (editor as any).blocksToFullHTML(editor.document)
+        const inner = await (editor as any).blocksToFullHTML(exportBlocks())
         const saved = await ipc.exporter.pdf(docName() + '.pdf', fullExportHtml(docName(), inner))
         if (saved) toast('已导出 PDF', 'success')
       } catch (e) {
@@ -725,7 +759,7 @@ export function DocEditor({
     }
     const onExportWord = async () => {
       try {
-        const inner = await (editor as any).blocksToFullHTML(editor.document)
+        const inner = await (editor as any).blocksToFullHTML(exportBlocks())
         const saved = await ipc.exporter.saveText(docName() + '.doc', fullExportHtml(docName(), inner), [
           { name: 'Word', extensions: ['doc'] }
         ])
@@ -736,7 +770,7 @@ export function DocEditor({
     }
     const onExportHtml = async () => {
       try {
-        const inner = await (editor as any).blocksToFullHTML(editor.document)
+        const inner = await (editor as any).blocksToFullHTML(exportBlocks())
         const saved = await ipc.exporter.saveText(docName() + '.html', fullExportHtml(docName(), inner), [
           { name: 'HTML', extensions: ['html', 'htm'] }
         ])
@@ -758,7 +792,7 @@ export function DocEditor({
       window.removeEventListener('biji:export-html', onExportHtml)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, path])
+  }, [editor, headingNumbers, headingNumberStyle, path])
 
   // 历史版本恢复后，无需关闭标签页即可把磁盘中的版本重新载入当前编辑器。
   useEffect(() => {
