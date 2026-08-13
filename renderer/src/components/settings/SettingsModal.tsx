@@ -181,12 +181,21 @@ function AIPane() {
   const remove = useProviders((s) => s.remove)
   const [editing, setEditing] = useState<AIProvider | null>(null)
   const [testMsg, setTestMsg] = useState('')
+  const [testing, setTesting] = useState(false)
 
   const test = async () => {
     if (!editing) return
+    if (testing) return
+    setTesting(true)
     setTestMsg('测试中…')
-    const r = (await ipc.ai.test(editing)) as { ok: boolean; error?: string }
-    setTestMsg(r.ok ? '✅ 连接成功' : '❌ ' + (r.error || '失败'))
+    try {
+      const r = (await ipc.ai.test(editing)) as { ok: boolean; error?: string }
+      setTestMsg(r.ok ? '✅ 地址、密钥、模型和对话测试均已通过' : '❌ ' + (r.error || '测试失败'))
+    } catch (error) {
+      setTestMsg('❌ 测试失败：' + (error as Error).message)
+    } finally {
+      setTesting(false)
+    }
   }
 
   const save = async () => {
@@ -234,8 +243,8 @@ function AIPane() {
           <input type="number" min={0} max={2} step={0.1} value={editing.temperature} onChange={(e) => setEditing({ ...editing, temperature: Number(e.target.value) })} />
         </div>
         <div className="row gap">
-          <button className="btn" onClick={test}>
-            测试连接
+          <button className="btn" disabled={testing} onClick={test}>
+            {testing ? '测试中…' : '测试连接'}
           </button>
           <button className="btn primary" onClick={save}>
             保存
@@ -243,7 +252,7 @@ function AIPane() {
           <button className="btn" onClick={() => { setEditing(null); setTestMsg('') }}>
             取消
           </button>
-          <span className="test-msg">{testMsg}</span>
+          <span className={`test-msg${testMsg.startsWith('✅') ? ' success' : testMsg.startsWith('❌') ? ' error' : ''}`}>{testMsg}</span>
         </div>
       </div>
     )

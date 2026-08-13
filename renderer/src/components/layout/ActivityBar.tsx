@@ -7,12 +7,19 @@ import { Icon, type IconName } from '@/components/common/Icon'
 // AI 已统一为 Ctrl+Space 全局悬浮窗，不再占用主工作区或产生 AI 分屏。
 export function ActivityBar() {
   const activityView = useUI((s) => s.activityView)
+  const sidebarCollapsed = useUI((s) => s.sidebarCollapsed)
   const setActivityView = useUI((s) => s.setActivityView)
+  const toggleSidebar = useUI((s) => s.toggleSidebar)
   const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   const setLoginOpen = useUI((s) => s.setLoginOpen)
   const focusOrOpen = usePanes((s) => s.focusOrOpen)
   const authStatus = useAuth((s) => s.status)
   const user = useAuth((s) => s.user)
+  const openSidebarView = (view: 'library' | 'team' | 'trash') => {
+    if (activityView === view && !sidebarCollapsed) toggleSidebar()
+    else setActivityView(view)
+    focusOrOpen('editor')
+  }
   const viewItem = (content: Exclude<PaneContent, 'editor'>, icon: IconName, title: string) => (
     <button
       className={`activity-item${activityView === content ? ' active' : ''}`}
@@ -30,21 +37,15 @@ export function ActivityBar() {
     <div className="activity-bar">
       <button
         className={`activity-item${activityView === 'library' ? ' active' : ''}`}
-        title="资料库"
-        onClick={() => {
-          setActivityView('library')
-          focusOrOpen('editor')
-        }}
+        title={activityView === 'library' && !sidebarCollapsed ? '隐藏资料库' : '显示资料库'}
+        onClick={() => openSidebarView('library')}
       >
         <Icon name="panel-left" size={22} />
       </button>
       <button
         className={`activity-item${activityView === 'team' ? ' active' : ''}`}
-        title="团队笔记"
-        onClick={() => {
-          setActivityView('team')
-          focusOrOpen('editor')
-        }}
+        title={activityView === 'team' && !sidebarCollapsed ? '隐藏团队笔记' : '显示团队笔记'}
+        onClick={() => openSidebarView('team')}
       >
         <Icon name="users" size={22} />
       </button>
@@ -53,8 +54,8 @@ export function ActivityBar() {
       <div style={{ flex: 1 }} />
       <button
         className={`activity-item${activityView === 'trash' ? ' active' : ''}`}
-        title="回收站"
-        onClick={() => { setActivityView('trash'); focusOrOpen('editor') }}
+        title={activityView === 'trash' && !sidebarCollapsed ? '隐藏回收站' : '显示回收站'}
+        onClick={() => openSidebarView('trash')}
       >
         <Icon name="trash" size={21} />
       </button>

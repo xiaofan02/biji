@@ -887,13 +887,20 @@ export function DocEditor({
       for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName]
         const source: unknown[][] = []
+        const importedStyles: Record<string, { format?: 'number' | 'percent' | 'currency' }> = {}
         const decoded = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null
         if (decoded) {
           for (let rowIndex = decoded.s.r; rowIndex <= decoded.e.r; rowIndex++) {
             const row: unknown[] = []
             for (let colIndex = decoded.s.c; colIndex <= decoded.e.c; colIndex++) {
               const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })]
-              row.push(cell?.f ? `=${cell.f}` : cell?.w ?? cell?.v ?? '')
+              // 数值单元格保存原始值，显示格式单独进入 styles；否则百分比会被
+              // 固化成“10%”文本，后续公式、排序和重新导出都会失去数值语义。
+              row.push(cell?.f ? `=${cell.f}` : cell?.v ?? cell?.w ?? '')
+              const numberFormat = String(cell?.z || '')
+              if (numberFormat.includes('%')) importedStyles[`${rowIndex - decoded.s.r}:${colIndex - decoded.s.c}`] = { format: 'percent' }
+              else if (/[¥￥$€£]/.test(numberFormat)) importedStyles[`${rowIndex - decoded.s.r}:${colIndex - decoded.s.c}`] = { format: 'currency' }
+              else if (cell?.t === 'n' && /[0#][.,]/.test(numberFormat)) importedStyles[`${rowIndex - decoded.s.r}:${colIndex - decoded.s.c}`] = { format: 'number' }
             }
             source.push(row)
           }
@@ -912,7 +919,7 @@ export function DocEditor({
           id: crypto.randomUUID(),
           name: sheetName,
           data: JSON.stringify(limited),
-          styles: '{}',
+          styles: JSON.stringify(importedStyles),
           columnWidths: JSON.stringify(columnWidths),
           frozenRows: 0
         })
@@ -963,8 +970,21 @@ export function DocEditor({
       used.add(name)
       const sheet = XLSX.utils.aoa_to_sheet(data)
       data.forEach((row, rowIndex) => row.forEach((value, colIndex) => {
-        if (typeof value === 'string' && value.startsWith('=')) sheet[XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })] = { t: 'n', f: value.slice(1) }
+        const address = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })
+        if (typeof value === 'string' && value.startsWith('=')) sheet[address] = { t: 'n', f: value.slice(1) }
       }))
+      try {
+        const styles = typeof item.styles === 'string' ? JSON.parse(item.styles || '{}') : item.styles || {}
+        Object.entries(styles).forEach(([key, value]) => {
+          const [row, col] = key.split(':').map(Number)
+          const cell = sheet[XLSX.utils.encode_cell({ r: row, c: col })]
+          if (!cell) return
+          const format = (value as { format?: string }).format
+          if (format === 'number') cell.z = '#,##0.00'
+          else if (format === 'percent') cell.z = '0.00%'
+          else if (format === 'currency') cell.z = '¥#,##0.00'
+        })
+      } catch { /* 格式损坏时仍导出数据 */ }
       try {
         const widths = typeof item.columnWidths === 'string' ? JSON.parse(item.columnWidths || '[]') as number[] : item.columnWidths || []
         sheet['!cols'] = widths.map((pixels: number) => ({ wpx: pixels }))

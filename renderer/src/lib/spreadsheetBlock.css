@@ -128,6 +128,19 @@
 .moqi-color-control > input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .moqi-color-control.fill > span { font-size: 15px; line-height: 15px; }
 .moqi-ribbon-filter-group { min-width: 230px; gap: 5px; }
+.moqi-number-format-group { min-width: 170px; gap: 5px; }
+.moqi-number-format-group select {
+  width: 88px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 6px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  outline: none;
+  font-size: 12px;
+}
+.moqi-number-format-group select:focus { border-color: #107c41; }
 .moqi-sheet-filter {
   width: 135px;
   height: 28px;
@@ -191,8 +204,11 @@
 .moqi-sheet-scroll { max-height: 520px; overflow: auto; outline: none; }
 .moqi-sheet-scroll table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: max-content; min-width: 100%; }
 .moqi-sheet-scroll th, .moqi-sheet-scroll td { box-sizing: border-box; height: 30px; padding: 0; border: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.moqi-sheet-scroll thead th { position: sticky; top: 0; z-index: 3; min-width: 120px; background: color-mix(in srgb, var(--bg-secondary) 96%, #107c41 4%); color: var(--text-secondary); font: 12px/30px 'Segoe UI', sans-serif; text-align: center; }
-.moqi-sheet-scroll .moqi-sheet-corner { left: 0; z-index: 5; min-width: 42px; width: 42px; }
+.moqi-sheet-scroll thead th { position: sticky; top: 0; z-index: 3; min-width: 120px; background: color-mix(in srgb, var(--bg-secondary) 96%, #107c41 4%); color: var(--text-secondary); font: 12px/30px 'Segoe UI', sans-serif; text-align: center; user-select: none; }
+.moqi-sheet-scroll .moqi-sheet-corner { left: 0; z-index: 5; min-width: 42px; width: 42px; cursor: pointer; }
+.moqi-sheet-corner > span { display: block; width: 0; height: 0; margin: 0 0 3px 5px; border-right: 8px solid transparent; border-bottom: 8px solid var(--text-tertiary); }
+.moqi-column-resizer { position: absolute; top: 0; right: -3px; bottom: 0; z-index: 7; width: 7px; cursor: col-resize; }
+.moqi-column-resizer:hover { background: #107c41; opacity: .75; }
 .moqi-sheet-row-number { position: sticky; left: 0; z-index: 2; width: 42px; min-width: 42px; background: var(--bg-secondary); color: var(--text-tertiary); font: 12px/30px 'Segoe UI', sans-serif; text-align: center; }
 .moqi-sheet-scroll td { min-width: 120px; background: var(--bg-primary); }
 .moqi-sheet-scroll td.is-selected { background: color-mix(in srgb, #107c41 9%, var(--bg-primary)); }
@@ -260,6 +276,48 @@
 .moqi-sheet-tab-menu button:hover { color: var(--text-primary); background: var(--bg-secondary); }
 .moqi-sheet-tab-menu button.danger { color: #ef4444; }
 .moqi-sheet-tab-hint { flex: none; display: flex; align-items: center; padding: 0 10px; border-left: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; }
+
+.moqi-sheet-status {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 92%, #107c41 8%);
+  font: 11px 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+.moqi-sheet-status > span:first-child { margin-right: auto; color: #107c41; }
+
+.moqi-cell-menu {
+  position: fixed;
+  z-index: 10000;
+  width: 190px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 24%, transparent);
+}
+.moqi-cell-menu button {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.moqi-cell-menu button:hover { background: var(--bg-secondary); }
+.moqi-cell-menu hr { margin: 5px 3px; border: 0; border-top: 1px solid var(--border); }
+.moqi-cell-menu kbd { color: var(--text-tertiary); background: transparent; font: 10px 'Segoe UI', sans-serif; }
 
 @media (max-width: 760px) {
   .moqi-sheet-name { width: 110px; }

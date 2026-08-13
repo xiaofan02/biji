@@ -28,6 +28,31 @@ interface HttpResult {
   headers: http.IncomingHttpHeaders
 }
 
+function normalizeOpenAIBaseUrl(value?: string): string {
+  let base = (value || 'https://api.openai.com/v1').trim().replace(/\/+$/, '')
+  base = base.replace(/\/(?:chat\/completions|responses|models)$/i, '')
+  return base
+}
+
+function responseError(status: number, body: string, fallback: string): string {
+  let detail = body.trim()
+  try {
+    const parsed = JSON.parse(body)
+    detail = String(parsed?.error?.message || parsed?.message || parsed?.error || detail)
+  } catch {
+    /* 非 JSON 错误正文原样保留 */
+  }
+  if (!detail) {
+    if (status === 401) detail = 'API Key 无效或未提供'
+    else if (status === 403) detail = '当前 API Key 没有访问权限'
+    else if (status === 404) detail = '接口地址或模型不存在'
+    else if (status === 429) detail = '请求过于频繁或账户额度不足'
+    else if (status >= 500) detail = '服务商或其上游模型暂时不可用'
+    else detail = fallback
+  }
+  return `${fallback} (${status})：${detail}`
+}
+
 function httpRequest(urlString: string, options: { method?: string; headers?: Record<string, string> }, body?: string): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
     const u = new URL(urlString)
@@ -48,6 +73,7 @@ function httpRequest(urlString: string, options: { method?: string; headers?: Re
       }
     )
     req.on('error', reject)
+    req.setTimeout(30000, () => req.destroy(new Error('请求超时（30 秒），请检查 API 地址和网络')))
     if (body) req.write(body)
     req.end()
   })
@@ -74,7 +100,7 @@ function streamRequest(
         if ((res.statusCode || 0) >= 400) {
           let err = ''
           res.on('data', (c) => (err += c))
-          res.on('end', () => reject(new Error(`HTTP ${res.statusCode}: ${err}`)))
+          res.on('end', () => reject(new Error(responseError(res.statusCode || 0, err, 'AI 请求失败'))))
           return
         }
         res.setEncoding('utf-8')
@@ -92,6 +118,7 @@ function streamRequest(
       }
     )
     req.on('error', reject)
+    req.setTimeout(60000, () => req.destroy(new Error('AI 响应超时（60 秒）')))
     if (body) req.write(body)
     req.end()
   })
@@ -104,9 +131,11 @@ export async function callOpenAICompatible(
   event: IpcMainInvokeEvent | null,
   reqId: string | null
 ): Promise<{ text: string }> {
-  const url = (provider.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '') + '/chat/completions'
+  const url = normalizeOpenAIBaseUrl(provider.baseUrl) + '/chat/completions'
   const headers = {
     'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'User-Agent': 'MOQI-Desktop/0.7',
     Authorization: `Bearer ${provider.apiKey || ''}`
   }
   const body = JSON.stringify({
@@ -118,7 +147,7 @@ export async function callOpenAICompatible(
 
   if (!stream) {
     const r = await httpRequest(url, { method: 'POST', headers }, body)
-    if (r.status >= 400) throw new Error(`AI 请求失败 (${r.status}): ${r.body}`)
+    if (r.status >= 400) throw new Error(responseError(r.status, r.body, 'AI 请求失败'))
     const json = JSON.parse(r.body)
     return { text: json.choices?.[0]?.message?.content || '' }
   }
@@ -267,12 +296,17 @@ export async function test(provider: AIProvider): Promise<{ ok: boolean; info?: 
       if (r.status >= 400) return { ok: false, error: `状态 ${r.status}` }
       return { ok: true, info: JSON.parse(r.body) }
     }
-    const testMsgs: ChatMessage[] = [{ role: 'user', content: 'hi' }]
+    if (!provider.baseUrl?.trim() && provider.type === 'custom') return { ok: false, error: '请填写 API 地址（Base URL）' }
+    if (!provider.apiKey?.trim()) return { ok: false, error: '请填写 API Key' }
+    if (!provider.model?.trim()) return { ok: false, error: '请填写模型名' }
+    // 兼容网关对 /models 的实现差异很大，连接测试直接调用实际对话接口，
+    // 这样地址、密钥、模型名和上游服务能在一次请求中得到准确验证。
+    const testMsgs: ChatMessage[] = [{ role: 'user', content: '只回复 OK' }]
     const result =
       provider.type === 'anthropic'
         ? await callAnthropic(provider, testMsgs, false, null, null)
         : await callOpenAICompatible(provider, testMsgs, false, null, null)
-    return { ok: true, info: { reply: (result.text || '').slice(0, 100) } }
+    return { ok: true, info: { reply: (result.text || '').slice(0, 100), stage: 'chat' } }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

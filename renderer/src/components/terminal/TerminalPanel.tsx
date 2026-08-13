@@ -11,6 +11,7 @@ import { normalizeSSHHost } from '@/lib/hosts'
 import { Icon } from '@/components/common/Icon'
 import { useUI } from '@/store/useUI'
 import { useTabs } from '@/store/useTabs'
+import { useWorkspace } from '@/store/useWorkspace'
 import { exportMoqiSessions, importSessionText } from '@/lib/sessionTransfer'
 import type { SSHHost, TelnetHost, SerialHost } from '@/types'
 import { api, type SharedRemoteSession } from '@/lib/api'
@@ -997,25 +998,40 @@ export function TerminalPanel() {
     [leaves, terminalFolders]
   )
 
-  const saveExecutionRecord = (text: string, results: Array<{ name: string; output: string; error?: string }>) => {
-    const tabsState = useTabs.getState()
-    if (!tabsState.activePath || !tabsState.tabs.some((item) => item.path === tabsState.activePath && item.kind === 'bnote')) {
-      toast('命令已执行，但当前没有打开可写入记录的笔记', 'error')
-      return
+  const saveExecutionRecords = async (text: string, results: Array<{ name: string; output: string; error?: string }>) => {
+    const workspace = String(await ipc.settings.get('workspace') || '')
+    if (!workspace) throw new Error('尚未设置资料库位置')
+    const now = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    const day = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`
+    const stamp = `${day}_${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}-${String(now.getMilliseconds()).padStart(3, '0')}`
+    const savedAt = now.toLocaleString('zh-CN', { hour12: false })
+    const folder = `${workspace.replace(/[\\/]$/, '')}/远程执行记录/${day}`
+    for (const [index, result] of results.entries()) {
+      const device = result.name.replace(/[\\/:*?"<>|]/g, '_').trim() || '未命名设备'
+      const output = result.error
+        ? `[执行失败] ${result.error}\n${result.output}`
+        : result.output || '[设备未返回可记录的输出]'
+      const content = [
+        '墨启 MOQI 远程执行记录',
+        `执行时间：${savedAt}`,
+        `目标设备：${result.name}`,
+        `执行结果：${result.error ? '失败' : '完成'}`,
+        '',
+        '==================== 执行命令 ====================',
+        text.trim(),
+        '',
+        '==================== 终端输出 ====================',
+        output.trim(),
+        ''
+      ].join('\n')
+      const order = String(index + 1).padStart(2, '0')
+      await ipc.fs.write(`${folder}/${stamp}_${order}_${device}.txt`, content)
     }
-    const safe = text.replace(/```/g, '``\\`')
-    const savedAt = new Date().toLocaleString('zh-CN', { hour12: false })
-    const targetNames = results.map((result) => result.name)
-    const sections = results.map((result) => {
-      const output = (result.error ? `[执行失败] ${result.error}\n${result.output}` : result.output || '[设备未返回可记录的输出]')
-        .replace(/```/g, '``\\`')
-      return `### ${result.name}\n\n#### 执行命令\n\n\`\`\`shell\n${safe}\n\`\`\`\n\n#### 终端输出\n\n\`\`\`text\n${output}\n\`\`\``
-    }).join('\n\n')
-    window.dispatchEvent(new CustomEvent('biji:save-to-note', {
-      detail: {
-        markdown: `## 远程执行记录\n\n> 时间：${savedAt}　目标：${targetNames.join('、')}\n\n${sections}`
-      }
-    }))
+    const workspaceState = useWorkspace.getState()
+    workspaceState.setExpanded(`${workspace.replace(/[\\/]$/, '')}/远程执行记录`, true)
+    workspaceState.setExpanded(folder, true)
+    await workspaceState.refresh()
   }
 
   const runSelectedExecution = async () => {
@@ -1052,12 +1068,12 @@ export function TerminalPanel() {
         }
       }
       if (!results.length) return toast('没有可执行的目标会话', 'error')
-      if (save) saveExecutionRecord(text, results)
+      if (save) await saveExecutionRecords(text, results)
       const succeeded = results.filter((result) => !result.error).length
       const failed = results.length - succeeded
       setExecution(null)
-      if (failed) toast(`执行完成：${succeeded} 个成功，${failed} 个失败${save ? '，记录已写入笔记' : ''}`, 'error')
-      else toast(results.length === 1 ? `执行完成${save ? '，命令与输出已写入笔记' : ''}` : `${results.length} 个会话执行完成${save ? '，命令与输出已写入笔记' : ''}`, 'success')
+      if (failed) toast(`执行完成：${succeeded} 个成功，${failed} 个失败${save ? '，记录已保存到资料库' : ''}`, 'error')
+      else toast(results.length === 1 ? `执行完成${save ? '，记录已保存到资料库' : ''}` : `${results.length} 个会话执行完成${save ? '，记录已保存到资料库' : ''}`, 'success')
     } finally {
       setExecutionRunning(false)
     }
@@ -1323,7 +1339,7 @@ export function TerminalPanel() {
               <pre>{execution.text}</pre>
               <label className="terminal-execute-save">
                 <input type="checkbox" disabled={executionRunning} checked={execution.save} onChange={(event) => setExecution({ ...execution, save: event.target.checked })} />
-                <span><strong>保存执行记录到当前笔记</strong><small>记录执行时间、目标会话、命令和设备返回的终端输出，便于审计与复盘。</small></span>
+                <span><strong>保存执行记录到资料库</strong><small>在“远程执行记录/日期”文件夹中按设备生成 TXT，包含命令、终端输出和失败原因。</small></span>
               </label>
               <div className="terminal-execute-warning">批量执行会依次连接文件夹中的设备并直接下发命令，请确认设备范围和命令内容无误。</div>
             </div>

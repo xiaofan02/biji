@@ -4,8 +4,9 @@ import './spreadsheetBlock.css'
 
 type Cell = { row: number; col: number }
 type Grid = string[][]
-type CellStyle = { bold?: boolean; color?: string; background?: string; align?: 'left' | 'center' | 'right' }
+type CellStyle = { bold?: boolean; italic?: boolean; underline?: boolean; color?: string; background?: string; align?: 'left' | 'center' | 'right'; format?: 'general' | 'number' | 'percent' | 'currency' }
 type StyleMap = Record<string, CellStyle>
+type WorkbookSnapshot = { sheets: WorkbookSheet[]; activeSheet: number }
 export type WorkbookSheet = {
   id: string
   name: string
@@ -140,24 +141,38 @@ function formulaValue(raw: string, grid: Grid): string {
     const left = Math.min(colIndex(a[1]), colIndex(b[1])); const right = Math.max(colIndex(a[1]), colIndex(b[1]))
     const top = Math.min(Number(a[2]), Number(b[2])) - 1; const bottom = Math.max(Number(a[2]), Number(b[2])) - 1
     const values: number[] = []
-    for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) values.push(Number(grid[row]?.[col]) || 0)
+    for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) {
+      const raw = grid[row]?.[col]
+      values.push(raw === undefined || raw.trim() === '' ? Number.NaN : Number(raw))
+    }
     return values
   }
   try {
     let expression = raw.slice(1).toUpperCase()
     expression = expression.replace(/(SUM|AVERAGE|MIN|MAX|COUNT)\(([A-Z]+\d+:[A-Z]+\d+)\)/g, (_all, fn, range) => {
       const values = rangeValues(range)
-      if (fn === 'SUM') return String(values.reduce((a, b) => a + b, 0))
-      if (fn === 'AVERAGE') return String(values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0)
-      if (fn === 'MIN') return String(values.length ? Math.min(...values) : 0)
-      if (fn === 'MAX') return String(values.length ? Math.max(...values) : 0)
-      return String(values.filter((value) => Number.isFinite(value)).length)
+      const numeric = values.filter((value) => Number.isFinite(value))
+      if (fn === 'SUM') return String(numeric.reduce((a, b) => a + b, 0))
+      if (fn === 'AVERAGE') return String(numeric.length ? numeric.reduce((a, b) => a + b, 0) / numeric.length : 0)
+      if (fn === 'MIN') return String(numeric.length ? Math.min(...numeric) : 0)
+      if (fn === 'MAX') return String(numeric.length ? Math.max(...numeric) : 0)
+      return String(numeric.length)
     })
     expression = expression.replace(/\b[A-Z]+\d+\b/g, (ref) => String(numberAt(ref)))
     if (!/^[\d+\-*/().\s]+$/.test(expression)) return '#公式?'
     const result = arithmetic(expression)
     return Number.isFinite(result) ? String(Math.round(result * 1e10) / 1e10) : '#错误'
   } catch { return '#错误' }
+}
+
+function displayValue(raw: string, grid: Grid, style?: CellStyle): string {
+  const value = formulaValue(raw, grid)
+  if (!style?.format || style.format === 'general' || value === '') return value
+  const number = Number(value)
+  if (!Number.isFinite(number)) return value
+  if (style.format === 'percent') return `${(number * 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}%`
+  if (style.format === 'currency') return number.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 2 })
+  return number.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function SpreadsheetView({ block, editor }: any) {
@@ -176,11 +191,20 @@ function SpreadsheetView({ block, editor }: any) {
   const [filterText, setFilterText] = useState('')
   const [ribbonTab, setRibbonTab] = useState<'home' | 'insert' | 'data' | 'view'>('home')
   const [sheetMenu, setSheetMenu] = useState<number | null>(null)
+  const [cellMenu, setCellMenu] = useState<{ x: number; y: number } | null>(null)
   const draggedSheet = useRef<number | null>(null)
+  const undoStack = useRef<WorkbookSnapshot[]>([])
+  const redoStack = useRef<WorkbookSnapshot[]>([])
+  const resizingColumn = useRef<{ col: number; startX: number; startWidth: number } | null>(null)
 
-  const commitSheets = (next: WorkbookSheet[], nextActive = activeSheet) => {
+  const commitSheets = (next: WorkbookSheet[], nextActive = activeSheet, remember = true) => {
     const safeActive = Math.max(0, Math.min(nextActive, next.length - 1))
     const current = next[safeActive]
+    if (remember) {
+      undoStack.current.push({ sheets: structuredClone(sheets), activeSheet })
+      if (undoStack.current.length > 80) undoStack.current.shift()
+      redoStack.current = []
+    }
     editor.updateBlock(block, { props: {
       sheets: JSON.stringify(next),
       activeSheet: safeActive,
@@ -208,7 +232,28 @@ function SpreadsheetView({ block, editor }: any) {
     setEditing(null)
     setFilterText('')
     setSheetMenu(null)
-    commitSheets(sheets, index)
+    commitSheets(sheets, index, false)
+  }
+
+  const restoreSnapshot = (snapshot: WorkbookSnapshot) => {
+    setAnchor({ row: 0, col: 0 })
+    setActive({ row: 0, col: 0 })
+    setEditing(null)
+    commitSheets(snapshot.sheets, snapshot.activeSheet, false)
+  }
+
+  const undo = () => {
+    const snapshot = undoStack.current.pop()
+    if (!snapshot) return
+    redoStack.current.push({ sheets: structuredClone(sheets), activeSheet })
+    restoreSnapshot(snapshot)
+  }
+
+  const redo = () => {
+    const snapshot = redoStack.current.pop()
+    if (!snapshot) return
+    undoStack.current.push({ sheets: structuredClone(sheets), activeSheet })
+    restoreSnapshot(snapshot)
   }
 
   const uniqueSheetName = (base = 'Sheet') => {
@@ -305,6 +350,59 @@ function SpreadsheetView({ block, editor }: any) {
     updateSheet({ styles: JSON.stringify(next) })
   }
 
+  const clearSelectionStyle = () => {
+    const next = { ...styles }
+    for (let row = range.top; row <= range.bottom; row++) {
+      for (let col = range.left; col <= range.right; col++) delete next[cellKey(row, col)]
+    }
+    updateSheet({ styles: JSON.stringify(next) })
+  }
+
+  const fillDown = () => {
+    if (range.bottom <= range.top) return
+    const next = grid.map((line) => [...line])
+    for (let col = range.left; col <= range.right; col++) {
+      const source = next[range.top][col]
+      for (let row = range.top + 1; row <= range.bottom; row++) next[row][col] = source
+    }
+    commit(next)
+  }
+
+  const fillRight = () => {
+    if (range.right <= range.left) return
+    const next = grid.map((line) => [...line])
+    for (let row = range.top; row <= range.bottom; row++) {
+      const source = next[row][range.left]
+      for (let col = range.left + 1; col <= range.right; col++) next[row][col] = source
+    }
+    commit(next)
+  }
+
+  const autoFitColumn = (col: number) => {
+    const longest = grid.reduce((max, row) => Math.max(max, formulaValue(row[col] || '', grid).length), columnName(col).length)
+    const next = Array.from({ length: grid[0].length }, (_, index) => widths[index] || 120)
+    next[col] = Math.max(60, Math.min(420, longest * 8 + 24))
+    updateSheet({ columnWidths: JSON.stringify(next) })
+  }
+
+  const selectionStats = useMemo(() => {
+    const values: string[] = []
+    for (let row = range.top; row <= range.bottom; row++) {
+      for (let col = range.left; col <= range.right; col++) {
+        const value = formulaValue(grid[row]?.[col] || '', grid)
+        if (value !== '') values.push(value)
+      }
+    }
+    const numbers = values.map(Number).filter(Number.isFinite)
+    const sum = numbers.reduce((total, value) => total + value, 0)
+    return {
+      count: values.length,
+      numericCount: numbers.length,
+      sum: Math.round(sum * 1e10) / 1e10,
+      average: numbers.length ? Math.round((sum / numbers.length) * 1e10) / 1e10 : 0
+    }
+  }, [grid, range.top, range.bottom, range.left, range.right])
+
   const resizeColumn = (delta: number) => {
     const next = Array.from({ length: grid[0].length }, (_, index) => widths[index] || 120)
     next[active.col] = Math.max(60, Math.min(420, next[active.col] + delta))
@@ -355,6 +453,11 @@ function SpreadsheetView({ block, editor }: any) {
     await navigator.clipboard.writeText(text)
   }
 
+  const cutRange = async () => {
+    await copyRange()
+    clearRange()
+  }
+
   const clearRange = () => {
     const next = grid.map((line) => [...line])
     for (let row = range.top; row <= range.bottom; row++) {
@@ -392,6 +495,30 @@ function SpreadsheetView({ block, editor }: any) {
     focusCell({ row: active.row, col: Math.min(range.left, Math.max((next[0]?.length || 1) - 1, 0)) })
   }
 
+  const startColumnResize = (event: React.MouseEvent, col: number) => {
+    event.preventDefault()
+    event.stopPropagation()
+    undoStack.current.push({ sheets: structuredClone(sheets), activeSheet })
+    if (undoStack.current.length > 80) undoStack.current.shift()
+    redoStack.current = []
+    resizingColumn.current = { col, startX: event.clientX, startWidth: widths[col] || 120 }
+    const onMove = (moveEvent: MouseEvent) => {
+      const current = resizingColumn.current
+      if (!current) return
+      const next = Array.from({ length: grid[0].length }, (_, index) => widths[index] || 120)
+      next[current.col] = Math.max(60, Math.min(420, current.startWidth + moveEvent.clientX - current.startX))
+      const updated = sheets.map((item, index) => index === activeSheet ? { ...item, columnWidths: JSON.stringify(next) } : item)
+      commitSheets(updated, activeSheet, false)
+    }
+    const onUp = () => {
+      resizingColumn.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   return (
     <div className="moqi-spreadsheet" contentEditable={false}>
       <div className="moqi-sheet-ribbon-tabs">
@@ -415,6 +542,9 @@ function SpreadsheetView({ block, editor }: any) {
       <div className="moqi-sheet-ribbon">
         {ribbonTab === 'home' && <>
           <div className="moqi-ribbon-group compact">
+            <button type="button" className="moqi-ribbon-command large" title="撤销（Ctrl+Z）" onClick={undo}><span>↶</span><small>撤销</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="重做（Ctrl+Y）" onClick={redo}><span>↷</span><small>重做</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="剪切所选单元格（Ctrl+X）" onClick={() => void cutRange()}><span>✂</span><small>剪切</small></button>
             <button type="button" className="moqi-ribbon-command large" title="复制所选单元格" onClick={() => void copyRange()}><span>▣</span><small>复制</small></button>
             <button type="button" className="moqi-ribbon-command large" title="清除所选内容" onClick={clearRange}><span>⌫</span><small>清除</small></button>
             <label>剪贴板</label>
@@ -422,6 +552,8 @@ function SpreadsheetView({ block, editor }: any) {
           <div className="moqi-ribbon-group">
             <div className="moqi-ribbon-row">
               <button type="button" className={styles[cellKey(active.row, active.col)]?.bold ? 'is-pressed' : ''} title="加粗" onClick={() => updateSelectionStyle({ bold: !styles[cellKey(active.row, active.col)]?.bold })}><strong>B</strong></button>
+              <button type="button" className={styles[cellKey(active.row, active.col)]?.italic ? 'is-pressed' : ''} title="斜体（Ctrl+I）" onClick={() => updateSelectionStyle({ italic: !styles[cellKey(active.row, active.col)]?.italic })}><em>I</em></button>
+              <button type="button" className={styles[cellKey(active.row, active.col)]?.underline ? 'is-pressed' : ''} title="下划线（Ctrl+U）" onClick={() => updateSelectionStyle({ underline: !styles[cellKey(active.row, active.col)]?.underline })}><u>U</u></button>
               <label className="moqi-color-control" title="文字颜色"><strong>A</strong><i style={{ background: styles[cellKey(active.row, active.col)]?.color || '#d13438' }} /><input type="color" value={styles[cellKey(active.row, active.col)]?.color || '#1f2329'} onChange={(event) => updateSelectionStyle({ color: event.target.value })} /></label>
               <label className="moqi-color-control fill" title="填充颜色"><span>▰</span><i style={{ background: styles[cellKey(active.row, active.col)]?.background || '#fff2cc' }} /><input type="color" value={styles[cellKey(active.row, active.col)]?.background || '#ffffff'} onChange={(event) => updateSelectionStyle({ background: event.target.value })} /></label>
             </div>
@@ -435,8 +567,20 @@ function SpreadsheetView({ block, editor }: any) {
             </div>
             <label>对齐方式</label>
           </div>
+          <div className="moqi-ribbon-group moqi-number-format-group">
+            <select value={styles[cellKey(active.row, active.col)]?.format || 'general'} onChange={(event) => updateSelectionStyle({ format: event.target.value as CellStyle['format'] })} title="数字格式">
+              <option value="general">常规</option>
+              <option value="number">数值</option>
+              <option value="percent">百分比</option>
+              <option value="currency">人民币</option>
+            </select>
+            <button type="button" title="清除所选单元格格式" onClick={clearSelectionStyle}>清除格式</button>
+            <label>数字与格式</label>
+          </div>
           <div className="moqi-ribbon-group compact">
             <button type="button" className="moqi-ribbon-command large" onClick={findReplace}><span>⌕</span><small>查找替换</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="把选区首行复制到下方（Ctrl+D）" onClick={fillDown}><span>↓</span><small>向下填充</small></button>
+            <button type="button" className="moqi-ribbon-command large" title="把选区首列复制到右侧（Ctrl+R）" onClick={fillRight}><span>→</span><small>向右填充</small></button>
             <label>编辑</label>
           </div>
         </>}
@@ -494,7 +638,17 @@ function SpreadsheetView({ block, editor }: any) {
         onMouseUp={() => { dragging.current = false }}
       >
         <table>
-          <thead><tr><th className="moqi-sheet-corner" />{grid[0].map((_, col) => <th key={col} style={{ width: widths[col] || 120, minWidth: widths[col] || 120 }} onClick={() => { setAnchor({ row: 0, col }); setActive({ row: grid.length - 1, col }) }}>{columnName(col)}</th>)}</tr></thead>
+          <thead><tr>
+            <th className="moqi-sheet-corner" title="选择全部" onClick={() => { setAnchor({ row: 0, col: 0 }); setActive({ row: grid.length - 1, col: grid[0].length - 1 }) }}><span /></th>
+            {grid[0].map((_, col) => <th key={col} style={{ width: widths[col] || 120, minWidth: widths[col] || 120 }} onClick={() => { setAnchor({ row: 0, col }); setActive({ row: grid.length - 1, col }) }}>
+              {columnName(col)}
+              <span className="moqi-column-resizer" title="拖动调整列宽；双击自动适应内容" onMouseDown={(event) => startColumnResize(event, col)} onDoubleClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                autoFitColumn(col)
+              }} />
+            </th>)}
+          </tr></thead>
           <tbody>
             {grid.map((row, rowIndex) => ({ row, rowIndex })).filter(({ row }) => !filterText || String(row[active.col] || '').toLowerCase().includes(filterText.toLowerCase())).map(({ row, rowIndex }) => (
               <tr key={rowIndex}>
@@ -513,26 +667,47 @@ function SpreadsheetView({ block, editor }: any) {
                         focusCell({ row: rowIndex, col: colIndex }, event.shiftKey)
                       }}
                       onMouseEnter={() => { if (dragging.current) setActive({ row: rowIndex, col: colIndex }) }}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        if (!selected) { setAnchor({ row: rowIndex, col: colIndex }); setActive({ row: rowIndex, col: colIndex }) }
+                        setCellMenu({ x: event.clientX, y: event.clientY })
+                      }}
                     >
                       <input
                         data-cell={`${rowIndex}:${colIndex}`}
-                        value={editing === cellKey(rowIndex, colIndex) ? value : formulaValue(value, grid)}
-                        style={{ color: styles[cellKey(rowIndex, colIndex)]?.color, fontWeight: styles[cellKey(rowIndex, colIndex)]?.bold ? 700 : undefined, textAlign: styles[cellKey(rowIndex, colIndex)]?.align }}
+                        value={editing === cellKey(rowIndex, colIndex) ? value : displayValue(value, grid, styles[cellKey(rowIndex, colIndex)])}
+                        style={{ color: styles[cellKey(rowIndex, colIndex)]?.color, fontWeight: styles[cellKey(rowIndex, colIndex)]?.bold ? 700 : undefined, fontStyle: styles[cellKey(rowIndex, colIndex)]?.italic ? 'italic' : undefined, textDecoration: styles[cellKey(rowIndex, colIndex)]?.underline ? 'underline' : undefined, textAlign: styles[cellKey(rowIndex, colIndex)]?.align }}
                         onChange={(event) => updateCell(rowIndex, colIndex, event.target.value)}
                         onFocus={() => { setEditing(cellKey(rowIndex, colIndex)); if (!dragging.current) focusCell({ row: rowIndex, col: colIndex }) }}
                         onBlur={() => setEditing(null)}
                         onPaste={(event) => {
                           const text = event.clipboardData.getData('text/plain')
-                          if (text.includes('\t') || text.includes('\n')) {
-                            event.preventDefault()
-                            pasteGrid(text)
-                          }
+                          event.preventDefault()
+                          pasteGrid(text)
                         }}
                         onKeyDown={(event) => {
-                          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && (range.top !== range.bottom || range.left !== range.right)) {
-                            event.preventDefault()
-                            void copyRange()
-                            return
+                          if (event.ctrlKey || event.metaKey) {
+                            const key = event.key.toLowerCase()
+                            if (key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
+                            if (key === 'y') { event.preventDefault(); redo(); return }
+                            if (key === 'a') {
+                              event.preventDefault()
+                              setAnchor({ row: 0, col: 0 })
+                              setActive({ row: grid.length - 1, col: grid[0].length - 1 })
+                              return
+                            }
+                            if (key === 'c') { event.preventDefault(); void copyRange(); return }
+                            if (key === 'x') { event.preventDefault(); void cutRange(); return }
+                            if (key === 'b') {
+                              event.preventDefault()
+                              updateSelectionStyle({ bold: !styles[cellKey(active.row, active.col)]?.bold })
+                              return
+                            }
+                            if (key === 'i') { event.preventDefault(); updateSelectionStyle({ italic: !styles[cellKey(active.row, active.col)]?.italic }); return }
+                            if (key === 'u') { event.preventDefault(); updateSelectionStyle({ underline: !styles[cellKey(active.row, active.col)]?.underline }); return }
+                            if (key === 'd') { event.preventDefault(); fillDown(); return }
+                            if (key === 'r') { event.preventDefault(); fillRight(); return }
                           }
                           if ((event.key === 'Delete' || event.key === 'Backspace') && (range.top !== range.bottom || range.left !== range.right)) {
                             event.preventDefault()
@@ -617,6 +792,22 @@ function SpreadsheetView({ block, editor }: any) {
         </div>
         <span className="moqi-sheet-tab-hint">{sheets.length} 个工作表</span>
       </div>
+      <div className="moqi-sheet-status">
+        <span>就绪</span>
+        <span>{selectionStats.count} 个非空单元格</span>
+        {selectionStats.numericCount > 0 && <><span>平均值：{selectionStats.average}</span><span>求和：{selectionStats.sum}</span></>}
+      </div>
+      {cellMenu && <div className="moqi-cell-menu" style={{ left: cellMenu.x, top: cellMenu.y }} onMouseLeave={() => setCellMenu(null)}>
+        <button type="button" onClick={() => { void cutRange(); setCellMenu(null) }}>剪切 <kbd>Ctrl+X</kbd></button>
+        <button type="button" onClick={() => { void copyRange(); setCellMenu(null) }}>复制 <kbd>Ctrl+C</kbd></button>
+        <button type="button" onClick={() => { clearRange(); setCellMenu(null) }}>清除内容 <kbd>Delete</kbd></button>
+        <button type="button" onClick={() => { clearSelectionStyle(); setCellMenu(null) }}>清除格式</button>
+        <hr />
+        <button type="button" onClick={() => { insertRow(); setCellMenu(null) }}>在上方插入行</button>
+        <button type="button" onClick={() => { insertColumn(); setCellMenu(null) }}>在左侧插入列</button>
+        <button type="button" onClick={() => { fillDown(); setCellMenu(null) }}>向下填充</button>
+        <button type="button" onClick={() => { fillRight(); setCellMenu(null) }}>向右填充</button>
+      </div>}
     </div>
   )
 }

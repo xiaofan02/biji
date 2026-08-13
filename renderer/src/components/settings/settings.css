@@ -106,10 +106,17 @@ small {
   padding: 0 12px;
 }
 .test-msg {
+  min-width: 0;
+  flex: 1;
   font-size: 13px;
   color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
   align-self: center;
 }
+.test-msg.success { color: #27a568; }
+.test-msg.error { color: #e0525e; }
+.provider-editor .row.gap { align-items: flex-start; }
 .about-pane h3 {
   margin-top: 0;
 }

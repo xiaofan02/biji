@@ -21,6 +21,7 @@ const store = new Store({
     workspace: join(app.getPath('documents'), 'BijiNotes'),
     theme: 'light',
     fontSize: 16,
+    pageZoomFactor: 1,
     terminalFontSize: 16,
     terminalColorScheme: 'traditional',
     terminalFolders: [],
@@ -38,6 +39,11 @@ const store = new Store({
 }) as any
 
 let mainWindow: BrowserWindow | null = null
+function setPageZoom(factor: number): void {
+  const next = Math.max(0.5, Math.min(3, Math.round(factor * 10) / 10))
+  mainWindow?.webContents.setZoomFactor(next)
+  store.set('pageZoomFactor', next)
+}
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 app.on('second-instance', () => {
@@ -188,6 +194,26 @@ function createWindow(): void {
       // (loadFile),与图片同源,不受影响,故仅在 dev 关闭。
       webSecurity: !process.env['ELECTRON_RENDERER_URL']
     }
+  })
+
+  // Electron 默认关闭触摸板 pinch-to-zoom。显式开启后，Windows 触摸板双指
+  // 捏合、触摸屏手势都能缩放整个应用页面；键盘/滚轮缩放继续使用页面缩放。
+  // 限制在 50%～300%，避免误操作后界面小到无法恢复或放大到失去控制。
+  void mainWindow.webContents.setVisualZoomLevelLimits(0.5, 3)
+  setPageZoom(Number(store.get('pageZoomFactor') || 1))
+  mainWindow.webContents.on('zoom-changed', (event, direction) => {
+    event.preventDefault()
+    const current = mainWindow?.webContents.getZoomFactor() || 1
+    setPageZoom(current + (direction === 'in' ? 0.1 : -0.1))
+  })
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) return
+    const key = input.key.toLowerCase()
+    if (!['+', '=', '-', '_', '0'].includes(key)) return
+    event.preventDefault()
+    const current = mainWindow?.webContents.getZoomFactor() || 1
+    if (key === '0') setPageZoom(1)
+    else setPageZoom(current + (key === '+' || key === '=' ? 0.1 : -0.1))
   })
 
   // Windows 上 hidden title bar 与部分显卡/系统组合可能不会触发 ready-to-show。
@@ -347,9 +373,9 @@ function buildMenu(): Menu {
         { role: 'reload', label: '重新加载' },
         { role: 'toggleDevTools', label: '开发者工具' },
         { type: 'separator' },
-        { role: 'resetZoom', label: '重置缩放' },
-        { role: 'zoomIn', label: '放大' },
-        { role: 'zoomOut', label: '缩小' },
+        { label: '重置缩放', accelerator: 'CmdOrCtrl+0', click: () => setPageZoom(1) },
+        { label: '放大', accelerator: 'CmdOrCtrl+Plus', click: () => setPageZoom((mainWindow?.webContents.getZoomFactor() || 1) + 0.1) },
+        { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => setPageZoom((mainWindow?.webContents.getZoomFactor() || 1) - 0.1) },
         { role: 'togglefullscreen', label: '全屏' }
       ]
     },
