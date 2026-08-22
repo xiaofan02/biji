@@ -5,6 +5,7 @@ import { createOnigurumaEngine } from 'shiki/engine/oniguruma'
 // @ts-ignore
 import { createCodeBlockSpec } from '@blocknote/core'
 import { spreadsheetBlock } from './spreadsheetBlock'
+import { ganttBlock } from './ganttBlock'
 
 // 代码块支持的语言(显示名 + 别名),用于语言下拉与 Shiki 高亮
 export const supportedLanguages: Record<string, { name: string; aliases?: string[] }> = {
@@ -70,6 +71,7 @@ export const bijiSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: annotatableCodeBlock,
-    spreadsheet: spreadsheetBlock()
+    spreadsheet: spreadsheetBlock(),
+    gantt: ganttBlock()
   }
 })

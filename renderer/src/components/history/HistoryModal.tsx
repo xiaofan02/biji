@@ -15,6 +15,7 @@ function textOf(value: any): string {
   if (!value || typeof value !== 'object') return ''
   if (typeof value.text === 'string') return value.text
   if (value.type === 'spreadsheet') return `[工作表：${value.props?.name || 'Sheet1'}]`
+  if (value.type === 'gantt') return `[甘特图：${value.props?.title || '项目计划'}]`
   return [textOf(value.content), textOf(value.children)].filter(Boolean).join(' ')
 }
 

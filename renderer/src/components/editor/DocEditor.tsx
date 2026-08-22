@@ -17,6 +17,7 @@ import './editor.css'
 import type { BijiDoc, Workflow } from '@/types'
 import { ipc } from '@/lib/ipc'
 import { bijiSchema } from '@/lib/blocknote'
+import { createDefaultGanttTasks } from '@/lib/ganttBlock'
 import { blocksForDisplay, blocksForStorage, titleFromPath, saveDoc, loadDoc } from '@/lib/note'
 import { localToVirtual, pushDoc } from '@/lib/sync'
 import { shouldSkipSave } from '@/lib/saveGuard'
@@ -1328,6 +1329,17 @@ export function DocEditor({
               getItems={async (query) => {
                 setSlashQuery(query)
                 const items: DefaultReactSuggestionItem[] = [
+                  {
+                    title: '甘特图任务计划',
+                    subtext: '用时间轴安排并行任务、负责人和进度',
+                    aliases: ['gantt', '甘特图', '时间计划', '项目计划', '排期', '进度'],
+                    group: '基础块',
+                    icon: <span aria-hidden="true">▥</span>,
+                    onItemClick: () => insertOrUpdateBlockForSlashMenu(editor as any, {
+                      type: 'gantt',
+                      props: { title: '项目计划', tasks: JSON.stringify(createDefaultGanttTasks()) }
+                    } as any)
+                  },
                   {
                     title: 'Excel 工作表',
                     subtext: '带行号、列标和键盘导航的可编辑表格',
