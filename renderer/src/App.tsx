@@ -63,34 +63,6 @@ export default function App() {
     document.documentElement.style.setProperty('--editor-font-size', fontSize + 'px')
   }, [fontSize])
 
-  // Windows 精密触摸板的双指捏合由 Chromium 表现为 ctrl+wheel。
-  // 原生视觉缩放会把页面缩在左上角，因此阻止默认行为并转换为 Electron
-  // 布局缩放：界面尺寸随手势改变，但应用始终铺满整个窗口。
-  useEffect(() => {
-    let accumulated = 0
-    let frame = 0
-    const flush = () => {
-      frame = 0
-      const value = accumulated
-      accumulated = 0
-      if (Math.abs(value) < 0.5) return
-      const delta = Math.max(-0.15, Math.min(0.15, value * 0.005))
-      void ipc.sys.zoomBy(delta)
-    }
-    const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey || event.altKey || event.metaKey) return
-      event.preventDefault()
-      event.stopPropagation()
-      accumulated += -event.deltaY
-      if (!frame) frame = window.requestAnimationFrame(flush)
-    }
-    window.addEventListener('wheel', onWheel, { capture: true, passive: false })
-    return () => {
-      window.removeEventListener('wheel', onWheel, true)
-      if (frame) window.cancelAnimationFrame(frame)
-    }
-  }, [])
-
   // 后台全量上传计划。0=暂停云端上传，但本地自动保存始终不受影响。
   useEffect(() => {
     if (!loaded) return

@@ -21,6 +21,7 @@ const store = new Store({
     workspace: join(app.getPath('documents'), 'BijiNotes'),
     theme: 'light',
     fontSize: 16,
+    documentZoom: 1,
     pageZoomFactor: 1,
     terminalFontSize: 16,
     terminalColorScheme: 'traditional',
@@ -39,11 +40,6 @@ const store = new Store({
 }) as any
 
 let mainWindow: BrowserWindow | null = null
-function setPageZoom(factor: number): void {
-  const next = Math.max(0.5, Math.min(3, Math.round(factor * 10) / 10))
-  mainWindow?.webContents.setZoomFactor(next)
-  store.set('pageZoomFactor', next)
-}
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 app.on('second-instance', () => {
@@ -201,21 +197,9 @@ function createWindow(): void {
   // 通过 window:zoom-by 转换成布局缩放，应用始终铺满整个窗口。
   void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
   // v0.7.0 曾启用视觉缩放。升级后仅执行一次复位，修复已经被缩到左上角的窗口；
-  // 此后仍正常记忆用户设置的布局缩放比例。
-  if (!store.get('layoutZoomMigrationV1')) {
-    store.set('pageZoomFactor', 1)
-    store.set('layoutZoomMigrationV1', true)
-  }
-  setPageZoom(Number(store.get('pageZoomFactor') || 1))
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) return
-    const key = input.key.toLowerCase()
-    if (!['+', '=', '-', '_', '0'].includes(key)) return
-    event.preventDefault()
-    const current = mainWindow?.webContents.getZoomFactor() || 1
-    if (key === '0') setPageZoom(1)
-    else setPageZoom(current + (key === '+' || key === '=' ? 0.1 : -0.1))
-  })
+  // 应用框架始终保持 100%；双指手势只缩放笔记正文，不再影响菜单和侧栏。
+  store.set('pageZoomFactor', 1)
+  mainWindow.webContents.setZoomFactor(1)
 
   // Windows 上 hidden title bar 与部分显卡/系统组合可能不会触发 ready-to-show。
   // 页面完成加载时主动显示，并保留超时兜底，避免应用只启动后台进程却没有窗口。
@@ -374,9 +358,9 @@ function buildMenu(): Menu {
         { role: 'reload', label: '重新加载' },
         { role: 'toggleDevTools', label: '开发者工具' },
         { type: 'separator' },
-        { label: '重置缩放', accelerator: 'CmdOrCtrl+0', click: () => setPageZoom(1) },
-        { label: '放大', accelerator: 'CmdOrCtrl+Plus', click: () => setPageZoom((mainWindow?.webContents.getZoomFactor() || 1) + 0.1) },
-        { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => setPageZoom((mainWindow?.webContents.getZoomFactor() || 1) - 0.1) },
+        { label: '重置笔记缩放', accelerator: 'CmdOrCtrl+0', click: () => send('menu:document-zoom', 'reset') },
+        { label: '放大笔记', accelerator: 'CmdOrCtrl+Plus', click: () => send('menu:document-zoom', 'in') },
+        { label: '缩小笔记', accelerator: 'CmdOrCtrl+-', click: () => send('menu:document-zoom', 'out') },
         { role: 'togglefullscreen', label: '全屏' }
       ]
     },
@@ -432,12 +416,6 @@ ipcMain.handle('window:set-theme', (_e, theme: 'light' | 'paper' | 'dark') => {
         : { color: '#f7f8fb', symbolColor: '#596274' }
   mainWindow?.setTitleBarOverlay({ ...palette, height: 54 })
   return true
-})
-ipcMain.handle('window:zoom-by', (_e, rawDelta: number) => {
-  const delta = Number.isFinite(rawDelta) ? Math.max(-0.2, Math.min(0.2, rawDelta)) : 0
-  const current = mainWindow?.webContents.getZoomFactor() || 1
-  setPageZoom(current + delta)
-  return mainWindow?.webContents.getZoomFactor() || 1
 })
 ipcMain.handle('settings:all', () => store.store)
 

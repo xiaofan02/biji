@@ -338,6 +338,7 @@ export function DocEditor({
   collaboration?: CollaborationSession | null
 }) {
   const theme = useSettings((s) => s.theme)
+  const documentZoom = useSettings((s) => s.documentZoom)
   const reducedLineWidth = useSettings((s) => s.reducedLineWidth)
   const setModified = useTabs((s) => s.setModified)
   const user = useAuth((s) => s.user)
@@ -368,6 +369,47 @@ export function DocEditor({
   const normalizingListsRef = useRef(false)
   const presence = useCollaboration((s) => s.documents[path])
   const [access, setAccess] = useState<{ visibility: 'private' | 'team'; ownerId?: string } | null>(null)
+
+  const changeDocumentZoom = useCallback((action: 'in' | 'out' | 'reset' | number) => {
+    const current = useSettings.getState().documentZoom
+    const next = action === 'reset' ? 1 : current + (action === 'in' ? 0.1 : action === 'out' ? -0.1 : action)
+    void useSettings.getState().setDocumentZoom(next)
+  }, [])
+
+  // 只在鼠标位于笔记区域时接管 Windows 触摸板双指捏合。
+  // 顶栏、活动栏、资料库、目录和状态栏保持固定尺寸。
+  useEffect(() => {
+    const root = docAreaRef.current
+    if (!root) return
+    let accumulated = 0
+    let frame = 0
+    const flush = () => {
+      frame = 0
+      const value = accumulated
+      accumulated = 0
+      if (Math.abs(value) < 0.5) return
+      changeDocumentZoom(Math.max(-0.15, Math.min(0.15, value * 0.005)))
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || event.altKey || event.metaKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      accumulated += -event.deltaY
+      if (!frame) frame = window.requestAnimationFrame(flush)
+    }
+    root.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    return () => {
+      root.removeEventListener('wheel', onWheel, true)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [changeDocumentZoom])
+
+  useEffect(() => {
+    const off = ipc.menu.on('menu:document-zoom', (action) =>
+      changeDocumentZoom(action as 'in' | 'out' | 'reset')
+    )
+    return () => { off() }
+  }, [changeDocumentZoom])
 
   useEffect(() => {
     let cancelled = false
@@ -1224,7 +1266,10 @@ export function DocEditor({
             if (file) void importSpreadsheet(file)
           }}
         />
-        <div className={`doc-scroll${headingNumbers ? ' numbered' : ''}${reducedLineWidth ? '' : ' full-width'}`}>
+        <div
+          className={`doc-scroll${headingNumbers ? ' numbered' : ''}${reducedLineWidth ? '' : ' full-width'}`}
+          style={{ zoom: documentZoom } as React.CSSProperties}
+        >
           <input
             className="doc-title-input"
             value={title}

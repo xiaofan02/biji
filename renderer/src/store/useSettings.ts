@@ -9,6 +9,7 @@ interface SettingsState {
   workspace: string
   theme: Theme
   fontSize: number
+  documentZoom: number
   reducedLineWidth: boolean
   terminalFontSize: number
   terminalColorScheme: TerminalColorScheme
@@ -18,6 +19,7 @@ interface SettingsState {
   init: () => Promise<void>
   setTheme: (t: Theme) => Promise<void>
   setFontSize: (n: number) => Promise<void>
+  setDocumentZoom: (n: number) => Promise<void>
   setReducedLineWidth: (enabled: boolean) => Promise<void>
   setTerminalFontSize: (n: number) => Promise<void>
   setTerminalColorScheme: (scheme: TerminalColorScheme) => Promise<void>
@@ -30,6 +32,7 @@ export const useSettings = create<SettingsState>((set) => ({
   workspace: '',
   theme: 'light',
   fontSize: 16,
+  documentZoom: 1,
   reducedLineWidth: true,
   terminalFontSize: 16,
   terminalColorScheme: 'traditional',
@@ -38,10 +41,11 @@ export const useSettings = create<SettingsState>((set) => ({
   loaded: false,
 
   init: async () => {
-    const [workspace, theme, fontSize, reducedLineWidth, terminalFontSize, terminalColorScheme, terminalFolders, syncIntervalHours] = await Promise.all([
+    const [workspace, theme, fontSize, documentZoom, reducedLineWidth, terminalFontSize, terminalColorScheme, terminalFolders, syncIntervalHours] = await Promise.all([
       ipc.fs.workspace() as Promise<string>,
       ipc.settings.get('theme') as Promise<Theme>,
       ipc.settings.get('fontSize') as Promise<number>,
+      ipc.settings.get('documentZoom') as Promise<number | undefined>,
       ipc.settings.get('reducedLineWidth') as Promise<boolean | undefined>,
       ipc.settings.get('terminalFontSize') as Promise<number>,
       ipc.settings.get('terminalColorScheme') as Promise<TerminalColorScheme>,
@@ -52,6 +56,7 @@ export const useSettings = create<SettingsState>((set) => ({
       workspace,
       theme: theme || 'light',
       fontSize: fontSize || 16,
+      documentZoom: Math.min(2, Math.max(0.6, documentZoom || 1)),
       reducedLineWidth: reducedLineWidth !== false,
       terminalFontSize: Math.min(36, Math.max(10, terminalFontSize || 16)),
       terminalColorScheme: terminalColorScheme || 'traditional',
@@ -73,6 +78,12 @@ export const useSettings = create<SettingsState>((set) => ({
   setFontSize: async (n) => {
     set({ fontSize: n })
     await ipc.settings.set('fontSize', n)
+  },
+
+  setDocumentZoom: async (n) => {
+    const documentZoom = Math.round(Math.min(2, Math.max(0.6, n)) * 100) / 100
+    set({ documentZoom })
+    await ipc.settings.set('documentZoom', documentZoom)
   },
 
   setReducedLineWidth: async (reducedLineWidth) => {
