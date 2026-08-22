@@ -197,8 +197,8 @@ function createWindow(): void {
   })
 
   // 禁用 Chromium 的“视觉缩放”：它只缩放网页画布，不重新计算窗口布局，
-  // 缩小时会把应用挤在左上角并留下大片空白。触摸板/滚轮请求改由下面的
-  // zoom-changed 转换成布局缩放，应用始终铺满整个窗口。
+  // 缩小时会把应用挤在左上角并留下大片空白。触摸板手势由渲染层捕获后
+  // 通过 window:zoom-by 转换成布局缩放，应用始终铺满整个窗口。
   void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
   // v0.7.0 曾启用视觉缩放。升级后仅执行一次复位，修复已经被缩到左上角的窗口；
   // 此后仍正常记忆用户设置的布局缩放比例。
@@ -207,11 +207,6 @@ function createWindow(): void {
     store.set('layoutZoomMigrationV1', true)
   }
   setPageZoom(Number(store.get('pageZoomFactor') || 1))
-  mainWindow.webContents.on('zoom-changed', (event, direction) => {
-    event.preventDefault()
-    const current = mainWindow?.webContents.getZoomFactor() || 1
-    setPageZoom(current + (direction === 'in' ? 0.1 : -0.1))
-  })
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) return
     const key = input.key.toLowerCase()
@@ -437,6 +432,12 @@ ipcMain.handle('window:set-theme', (_e, theme: 'light' | 'paper' | 'dark') => {
         : { color: '#f7f8fb', symbolColor: '#596274' }
   mainWindow?.setTitleBarOverlay({ ...palette, height: 54 })
   return true
+})
+ipcMain.handle('window:zoom-by', (_e, rawDelta: number) => {
+  const delta = Number.isFinite(rawDelta) ? Math.max(-0.2, Math.min(0.2, rawDelta)) : 0
+  const current = mainWindow?.webContents.getZoomFactor() || 1
+  setPageZoom(current + delta)
+  return mainWindow?.webContents.getZoomFactor() || 1
 })
 ipcMain.handle('settings:all', () => store.store)
 

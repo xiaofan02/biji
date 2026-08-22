@@ -113,6 +113,7 @@ const api = {
   },
   sys: {
     setWindowTheme: (theme: 'light' | 'paper' | 'dark') => ipcRenderer.invoke('window:set-theme', theme),
+    zoomBy: (delta: number) => ipcRenderer.invoke('window:zoom-by', delta) as Promise<number>,
     openExternal: (url: string) => ipcRenderer.invoke('sys:open-external', url),
     openPath: (p: string) => ipcRenderer.invoke('sys:open-path', p) as Promise<boolean>,
     openDataFile: (name: string, dataUrl: string) =>
