@@ -1,6 +1,6 @@
 {
   "name": "moqi",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
   "main": "app-build/main/index.js",
   "author": "biji",
@@ -15,6 +15,7 @@
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
     "start:legacy": "electron main.js"
   },
   "dependencies": {
@@ -118,8 +119,26 @@
       "artifactName": "MOQI-${version}-${arch}-Portable.${ext}"
     },
     "mac": {
-      "target": "dmg",
-      "category": "public.app-category.productivity"
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "MOQI-${version}-${arch}.${ext}",
+      "identity": null
     },
     "linux": {
       "target": [
