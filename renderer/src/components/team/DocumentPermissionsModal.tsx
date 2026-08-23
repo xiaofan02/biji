@@ -6,7 +6,7 @@ import { toast } from '@/store/useToast'
 import { Icon } from '@/components/common/Icon'
 
 type Permission = 'view' | 'edit'
-type OpenDetail = { path: string; name?: string }
+type OpenDetail = { path: string; name?: string; type?: 'file' | 'dir' }
 
 export function DocumentPermissionsModal() {
   const me = useAuth((state) => state.user)
@@ -71,22 +71,23 @@ export function DocumentPermissionsModal() {
           : []
       )
       await useTeamSpace.getState().refresh()
-      toast('文档访问权限已更新', 'success')
+      toast(`${target.type === 'dir' ? '文件夹' : '文档'}访问权限已更新`, 'success')
       setOpen(false)
     } catch (error) {
-      toast('保存文档权限失败：' + (error as Error).message, 'error')
+      toast(`保存${target.type === 'dir' ? '文件夹' : '文档'}权限失败：` + (error as Error).message, 'error')
     } finally {
       setSaving(false)
     }
   }
 
   if (!open || !target) return null
+  const isFolder = target.type === 'dir'
   return (
     <div className="modal-backdrop-full" onClick={() => setOpen(false)}>
       <div className="modal-card document-permissions-card" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <h3>文档访问权限</h3>
+            <h3>{isFolder ? '文件夹' : '文档'}访问权限</h3>
             <span className="team-members-sub">{target.name?.replace(/\.bnote$/i, '') || target.path}</span>
           </div>
           <button className="icon-btn" onClick={() => setOpen(false)}><Icon name="x" size={16} /></button>
@@ -97,11 +98,11 @@ export function DocumentPermissionsModal() {
             <div className="permission-scope-list">
               <label className={`permission-scope-option${access === 'all' ? ' active' : ''}`}>
                 <input type="radio" checked={access === 'all'} disabled={!canManage} onChange={() => setAccess('all')} />
-                <span><strong>全部团队成员</strong><small>所有团队成员都能查看；编辑者可以共同修改</small></span>
+                <span><strong>全部团队成员</strong><small>{isFolder ? '所有团队成员都能访问该文件夹及其中内容' : '所有团队成员都能查看；编辑者可以共同修改'}</small></span>
               </label>
               <label className={`permission-scope-option${access === 'restricted' ? ' active' : ''}`}>
                 <input type="radio" checked={access === 'restricted'} disabled={!canManage} onChange={() => setAccess('restricted')} />
-                <span><strong>指定成员</strong><small>只有创建者、管理员和下方选中的成员可以访问</small></span>
+                <span><strong>指定成员</strong><small>只有创建者、管理员和下方选中的成员可以访问{isFolder ? '该文件夹及其中内容' : ''}</small></span>
               </label>
             </div>
 
@@ -130,7 +131,8 @@ export function DocumentPermissionsModal() {
               </div>
             )}
 
-            {!canManage && <div className="permission-readonly-note">你可以查看当前权限，但只有文档创建者或管理员可以修改。</div>}
+            {isFolder && <div className="permission-readonly-note">文件夹权限会自动应用到其中的子文件夹和文档。</div>}
+            {!canManage && <div className="permission-readonly-note">你可以查看当前权限，但只有{isFolder ? '文件夹' : '文档'}创建者或管理员可以修改。</div>}
           </>
         )}
 

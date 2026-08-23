@@ -4,6 +4,7 @@ import { pool } from './db'
 import { env } from './env'
 import { asyncHandler, HttpError } from './http'
 import { authMiddleware } from './auth'
+import { writeAccess } from './nodeAccess'
 
 // 图片存库(bytea)。多人协同必须由服务器托管图片,所有人才看得到(本地 file:// 路径行不通)。
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
@@ -23,13 +24,8 @@ assetsRouter.post(
     const nodeId = (req.body?.nodeId as string | undefined) || null
     if (nodeId) {
       const access = await pool.query(
-        `SELECT 1 FROM nodes n WHERE n.id=$1 AND n.type='file' AND (
-          (n.owner_id=$2 AND (n.visibility='private' OR $3<>'viewer')) OR $3='admin'
-          OR (n.visibility='team' AND n.team_access='all' AND $3<>'viewer')
-          OR ($3<>'viewer' AND EXISTS (
-            SELECT 1 FROM node_permissions np WHERE np.node_id=n.id AND np.user_id=$2 AND np.permission='edit'
-          ))
-        )`,
+        `SELECT 1 FROM nodes n WHERE n.id=$1 AND n.type='file'
+          AND ${writeAccess('n', '$2', '$3')}`,
         [nodeId, req.user!.id, req.user!.role]
       )
       if (!access.rowCount) throw new HttpError(403, '无权向该文档上传附件')

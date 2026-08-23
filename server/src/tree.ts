@@ -4,6 +4,7 @@ import { pool } from './db'
 import { asyncHandler, HttpError } from './http'
 import { authMiddleware } from './auth'
 import { hocuspocus } from './hocuspocus'
+import { readAccess, writeAccess } from './nodeAccess'
 
 // 服务器端文档树:所有节点存在 nodes 表(扁平),以「虚拟路径 path」为唯一键。
 // 路径约定:'/' 分隔、无前导斜杠、根目录子节点 parent=''。例:'产品/需求.bnote'(parent='产品')。
@@ -37,23 +38,6 @@ export interface TreeNode {
   children?: TreeNode[]
 }
 
-function readAccess(alias: string, userParam: string, roleParam: string): string {
-  return `((${alias}.owner_id=${userParam} AND (${alias}.visibility='private' OR ${roleParam}<>'viewer'))
-    OR (${alias}.visibility='team' AND (
-      ${roleParam}='admin' OR ${alias}.type='dir' OR ${alias}.team_access='all'
-      OR EXISTS (SELECT 1 FROM node_permissions np WHERE np.node_id=${alias}.id AND np.user_id=${userParam})
-    )))`
-}
-
-function writeAccess(alias: string, userParam: string, roleParam: string): string {
-  return `(${alias}.owner_id=${userParam}
-    OR ${roleParam}='admin'
-    OR (${alias}.visibility='team' AND ${alias}.team_access='all' AND ${roleParam}<>'viewer')
-    OR (${roleParam}<>'viewer' AND EXISTS (
-      SELECT 1 FROM node_permissions np WHERE np.node_id=${alias}.id AND np.user_id=${userParam} AND np.permission='edit'
-    )))`
-}
-
 function cleanName(raw: unknown): string {
   const name = String(raw ?? '').trim()
   if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
@@ -82,12 +66,7 @@ treeRouter.get(
   asyncHandler(async (req, res) => {
     const { rows } = await pool.query<NodeRow>(
       `SELECT n.id, n.type, n.name, n.path, n.parent, n.ext, n.title, n.visibility, n.owner_id, n.team_access,
-        CASE
-          WHEN n.owner_id=$1 OR $2='admin' THEN 'edit'
-          WHEN $2='viewer' THEN 'view'
-          WHEN n.type='dir' OR n.team_access='all' THEN 'edit'
-          ELSE COALESCE((SELECT np.permission FROM node_permissions np WHERE np.node_id=n.id AND np.user_id=$1), 'view')
-        END AS access_level
+        CASE WHEN ${writeAccess('n', '$1', '$2')} THEN 'edit' ELSE 'view' END AS access_level
        FROM nodes n WHERE ${readAccess('n', '$1', '$2')}`,
       [req.user!.id, req.user!.role]
     )
@@ -135,8 +114,8 @@ treeRouter.post(
     const path = joinPath(String(parent), name)
     if (parent) {
       const allowedParent = await pool.query(
-        `SELECT 1 FROM nodes WHERE path=$1 AND type='dir' AND (visibility='team' OR owner_id=$2)`,
-        [String(parent), req.user!.id]
+        `SELECT 1 FROM nodes n WHERE n.path=$1 AND n.type='dir' AND ${writeAccess('n', '$2', '$3')}`,
+        [String(parent), req.user!.id, req.user!.role]
       )
       if (!allowedParent.rowCount) throw new HttpError(403, '无权在该目录中创建内容')
     }
@@ -235,8 +214,8 @@ treeRouter.post(
     // 指向不存在节点的“孤儿”记录，导致文件从树中消失。
     if (targetDir) {
       const { rows } = await pool.query<{ type: string }>(
-        `SELECT type FROM nodes WHERE path=$1 AND (visibility='team' OR owner_id=$2)`,
-        [targetDir, req.user!.id]
+        `SELECT n.type FROM nodes n WHERE n.path=$1 AND ${writeAccess('n', '$2', '$3')}`,
+        [targetDir, req.user!.id, req.user!.role]
       )
       if (!rows.length || rows[0]?.type !== 'dir') throw new HttpError(400, '目标目录不存在')
     }
@@ -308,12 +287,7 @@ treeRouter.get(
     if (!path) throw new HttpError(400, '缺少 path')
     const { rows } = await pool.query<NodeRow>(
       `SELECT n.id, n.type, n.name, n.path, n.parent, n.ext, n.title, n.visibility, n.owner_id, n.team_access,
-        CASE
-          WHEN n.owner_id=$2 OR $3='admin' THEN 'edit'
-          WHEN $3='viewer' THEN 'view'
-          WHEN n.type='dir' OR n.team_access='all' THEN 'edit'
-          ELSE COALESCE((SELECT np.permission FROM node_permissions np WHERE np.node_id=n.id AND np.user_id=$2), 'view')
-        END AS access_level
+        CASE WHEN ${writeAccess('n', '$2', '$3')} THEN 'edit' ELSE 'view' END AS access_level
        FROM nodes n WHERE n.path=$1 AND ${readAccess('n', '$2', '$3')}`,
       [path, req.user!.id, req.user!.role]
     )
@@ -424,7 +398,7 @@ treeRouter.post(
   })
 )
 
-// 个人/团队切换。只有创建者能改变范围；团队成员可以共同编辑，但不能擅自改变公开级别。
+// 团队文件或文件夹访问权限。文件夹权限会自动约束其全部子孙节点。
 treeRouter.get(
   '/nodes/permissions',
   asyncHandler(async (req, res) => {
@@ -432,11 +406,11 @@ treeRouter.get(
     if (!path) throw new HttpError(400, '缺少 path')
     const { rows } = await pool.query<{ id: string; owner_id: string | null; team_access: 'all' | 'restricted' }>(
       `SELECT n.id, n.owner_id, n.team_access FROM nodes n
-       WHERE n.path=$1 AND n.type='file' AND ${readAccess('n', '$2', '$3')}`,
+       WHERE n.path=$1 AND ${readAccess('n', '$2', '$3')}`,
       [path, req.user!.id, req.user!.role]
     )
     const node = rows[0]
-    if (!node) throw new HttpError(404, '文档不存在或无权访问')
+    if (!node) throw new HttpError(404, '内容不存在或无权访问')
     const permissions = await pool.query(
       `SELECT u.id AS user_id, u.username, u.display_name, u.color, np.permission
        FROM node_permissions np JOIN users u ON u.id=np.user_id
@@ -468,7 +442,7 @@ treeRouter.put(
     }
     if (!path) throw new HttpError(400, '缺少 path')
     if (access !== 'all' && access !== 'restricted') throw new HttpError(400, '访问范围无效')
-    if (req.user!.role === 'viewer') throw new HttpError(403, '只读成员不能修改团队文档权限')
+    if (req.user!.role === 'viewer') throw new HttpError(403, '只读成员不能修改团队内容权限')
     if (!Array.isArray(permissions)) throw new HttpError(400, '成员权限格式无效')
     const normalized = permissions
       .filter((item) => item?.userId && (item.permission === 'view' || item.permission === 'edit'))
@@ -481,16 +455,16 @@ treeRouter.put(
     try {
       await client.query('BEGIN')
       const { rows } = await client.query<{ id: string; owner_id: string | null }>(
-        `SELECT id, owner_id FROM nodes WHERE path=$1 AND type='file' AND visibility='team' FOR UPDATE`,
+        `SELECT id, owner_id FROM nodes WHERE path=$1 AND visibility='team' FOR UPDATE`,
         [path]
       )
       const node = rows[0]
-      if (!node) throw new HttpError(404, '团队文档不存在')
+      if (!node) throw new HttpError(404, '团队内容不存在')
       if (node.owner_id !== req.user!.id && req.user!.role !== 'admin') {
-        throw new HttpError(403, '只有文档创建者或管理员可以设置访问权限')
+        throw new HttpError(403, '只有内容创建者或管理员可以设置访问权限')
       }
       if (normalized.some((item) => item.userId === node.owner_id)) {
-        throw new HttpError(400, '文档创建者无需单独授权')
+        throw new HttpError(400, '内容创建者无需单独授权')
       }
       if (normalized.length) {
         const active = await client.query(
@@ -510,8 +484,12 @@ treeRouter.put(
         }
       }
       await client.query('COMMIT')
-      // Force every active collaborator to reconnect so the new access policy takes effect immediately.
-      hocuspocus.closeConnections(node.id)
+      // 文件夹权限会影响全部子文档，强制相关协作者重连以立即应用新权限。
+      const affected = await client.query<{ id: string }>(
+        `SELECT id FROM nodes WHERE type='file' AND (path=$1 OR starts_with(path, $2))`,
+        [path, path + '/']
+      )
+      for (const item of affected.rows) hocuspocus.closeConnections(item.id)
       res.json({ ok: true })
     } catch (error) {
       await client.query('ROLLBACK')

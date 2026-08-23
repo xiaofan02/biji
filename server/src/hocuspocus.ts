@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { pool } from './db'
 import { env } from './env'
 import { verifyToken, type AuthUser } from './auth'
+import { readAccess, writeAccess } from './nodeAccess'
 
 // 从 Y.Doc 提取标题:客户端把标题输入框绑定到 ydoc.getText('title')。
 // 服务器在存盘时读出来回写 nodes.title,供文档树展示(树列表无需加载每个 Y.Doc)。
@@ -22,17 +23,10 @@ export const hocuspocus = Server.configure({
       const tokenUser = verifyToken(data.token)
       const access = await pool.query(
         `SELECT u.username, u.display_name, u.color,
-          CASE
-            WHEN u.role='viewer' THEN 'viewer'
-            WHEN n.owner_id=u.id OR u.role='admin' OR n.team_access='all' OR np.permission='edit' THEN u.role
-            ELSE 'viewer'
-          END AS role
+          CASE WHEN ${writeAccess('n', '$2', 'u.role')} THEN u.role ELSE 'viewer' END AS role
          FROM nodes n
          JOIN users u ON u.id=$2 AND u.disabled_at IS NULL
-         LEFT JOIN node_permissions np ON np.node_id=n.id AND np.user_id=u.id
-         WHERE n.id=$1 AND n.type='file' AND (
-           n.owner_id=$2 OR (n.visibility='team' AND (u.role='admin' OR n.team_access='all' OR np.user_id IS NOT NULL))
-         )`,
+         WHERE n.id=$1 AND n.type='file' AND ${readAccess('n', '$2', 'u.role')}`,
         [data.documentName, tokenUser.id]
       )
       const row = access.rows[0]
@@ -80,14 +74,8 @@ export const hocuspocus = Server.configure({
       const r = await pool.query(
         `UPDATE nodes n SET ydoc=$1, title=COALESCE($2, n.title), updated_at=now(), updated_by=$3
          FROM users u
-         WHERE n.id=$4 AND u.id=$3 AND u.disabled_at IS NULL AND (
-           (n.owner_id=u.id AND (n.visibility='private' OR u.role<>'viewer'))
-           OR u.role='admin'
-           OR (n.visibility='team' AND n.team_access='all' AND u.role<>'viewer')
-           OR (u.role<>'viewer' AND EXISTS (
-             SELECT 1 FROM node_permissions np WHERE np.node_id=n.id AND np.user_id=u.id AND np.permission='edit'
-           ))
-         )`,
+         WHERE n.id=$4 AND u.id=$3 AND u.disabled_at IS NULL
+           AND ${writeAccess('n', '$3', 'u.role')}`,
         [update, title, user.id, data.documentName]
       )
       if (r.rowCount === 0) {

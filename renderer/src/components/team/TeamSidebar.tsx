@@ -62,7 +62,7 @@ function TeamNode({
       { label: '新建团队笔记', iconName: 'file-plus' as const, onClick: () => onCreateDoc(menuParent) },
       { label: '新建文件夹', iconName: 'folder-plus' as const, onClick: () => onCreateFolder(menuParent) }
     ] : []),
-    ...(node.type === 'file' ? [{
+    ...(node.path !== TEAM_ROOT ? [{
       label: '访问权限',
       iconName: 'users' as const,
       onClick: () => onPermissions(node)
@@ -309,7 +309,7 @@ export function TeamSidebar() {
           onMove={(nodeToMove, target) => void moveTeamNode(nodeToMove, target)}
           onDelete={(nodeToDelete) => void deleteTeamNode(nodeToDelete)}
           onPermissions={(permissionNode) => window.dispatchEvent(new CustomEvent('moqi:open-document-permissions', {
-            detail: { path: permissionNode.path, name: permissionNode.name }
+            detail: { path: permissionNode.path, name: permissionNode.name, type: permissionNode.type }
           }))}
         />
       ))}

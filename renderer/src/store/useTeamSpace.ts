@@ -10,6 +10,11 @@ function onlyTeam(nodes: TreeNode[], insideTeamRoot = false): TreeNode[] {
     const isTeamRoot = node.path === '团队空间'
     const inDedicatedSpace = insideTeamRoot || isTeamRoot
     const children = node.children ? onlyTeam(node.children, inDedicatedSpace) : []
+    // 团队页本身已经表达了空间范围，不再重复显示一层“团队空间”根目录。
+    if (isTeamRoot) {
+      result.push(...children)
+      continue
+    }
     if (node.visibility === 'team' && (node.type === 'file' || inDedicatedSpace)) {
       result.push({ ...node, children })
     } else {
