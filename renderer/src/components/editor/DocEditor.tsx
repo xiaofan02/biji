@@ -1358,8 +1358,8 @@ export function DocEditor({
               suggestionMenuComponent={(props) => <SearchableSlashMenu {...props} query={slashQuery} />}
             />
           </BlockNoteView>
-          <CodeGutters scrollRef={docAreaRef} />
-          {headingNumbers && <HeadingNumbers scrollRef={docAreaRef} numbers={headingNums} />}
+          <CodeGutters scrollRef={docAreaRef} zoom={documentZoom} />
+          {headingNumbers && <HeadingNumbers scrollRef={docAreaRef} numbers={headingNums} zoom={documentZoom} />}
         </div>
         <CodeBlockCopy containerRef={docAreaRef} />
         <CodeBlockInsertAfter containerRef={docAreaRef} editor={editor} />
@@ -1406,10 +1406,12 @@ export function DocEditor({
 // numbers 按 DOM 标题顺序(= extractHeadings 文档顺序)一一对应。
 function HeadingNumbers({
   scrollRef,
-  numbers
+  numbers,
+  zoom
 }: {
   scrollRef: React.RefObject<HTMLDivElement | null>
   numbers: string[]
+  zoom: number
 }) {
   type N = { key: number; top: number; left: number; width: number; height: number; fontSize: string; text: string }
   const [items, setItems] = useState<N[]>([])
@@ -1419,6 +1421,9 @@ function HeadingNumbers({
     let raf = 0
     const recompute = () => {
       const sRect = scroll.getBoundingClientRect()
+      // getBoundingClientRect 返回 zoom 后的屏幕坐标，而叠加层本身位于同一个
+      // zoom 容器中，定位值必须还原为缩放前的 CSS 坐标，否则会被再次放大。
+      const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
       const heads = Array.from(
         scroll.querySelectorAll<HTMLElement>(".bn-block-content[data-content-type='heading']")
       )
@@ -1430,10 +1435,10 @@ function HeadingNumbers({
         const cs = getComputedStyle(el)
         next.push({
           key: i,
-          top: r.top - sRect.top + scroll.scrollTop + (parseFloat(cs.paddingTop) || 0),
-          left: r.left - sRect.left + scroll.scrollLeft,
+          top: (r.top - sRect.top) / scale + scroll.scrollTop + (parseFloat(cs.paddingTop) || 0),
+          left: (r.left - sRect.left) / scale + scroll.scrollLeft,
           width: parseFloat(cs.paddingLeft) || 0,
-          height: parseFloat(cs.lineHeight) || r.height,
+          height: parseFloat(cs.lineHeight) || r.height / scale,
           fontSize: cs.fontSize,
           text: num
         })
@@ -1454,7 +1459,7 @@ function HeadingNumbers({
       mo.disconnect()
       ro.disconnect()
     }
-  }, [scrollRef, numbers])
+  }, [scrollRef, numbers, zoom])
 
   return (
     <>
@@ -1803,7 +1808,7 @@ function CodeSelectionColorToolbar({
   )
 }
 
-function CodeGutters({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
+function CodeGutters({ scrollRef, zoom }: { scrollRef: React.RefObject<HTMLDivElement | null>; zoom: number }) {
   type G = {
     key: string
     top: number
@@ -1823,6 +1828,7 @@ function CodeGutters({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement 
     let raf = 0
     const recompute = () => {
       const sRect = scroll.getBoundingClientRect()
+      const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
       const blocks = Array.from(scroll.querySelectorAll<HTMLElement>('[data-content-type="codeBlock"]'))
       const next: G[] = []
       blocks.forEach((blk, i) => {
@@ -1835,9 +1841,9 @@ function CodeGutters({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement 
         const text = code.innerText.replace(/\n$/, '')
         next.push({
           key: blk.getAttribute('data-id') || `cb${i}`,
-          top: pRect.top - sRect.top + scroll.scrollTop,
-          left: pRect.left - sRect.left + scroll.scrollLeft,
-          height: pRect.height,
+          top: (pRect.top - sRect.top) / scale + scroll.scrollTop,
+          left: (pRect.left - sRect.left) / scale + scroll.scrollLeft,
+          height: pRect.height / scale,
           // 行高取 <pre>(实际决定每行行盒高度的 strut),padding-top 同取自 pre;字体/字号取 code 保证数字与代码同款等宽
           lineHeight: preCs.lineHeight,
           paddingTop: preCs.paddingTop,
@@ -1862,7 +1868,7 @@ function CodeGutters({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement 
       mo.disconnect()
       ro.disconnect()
     }
-  }, [scrollRef])
+  }, [scrollRef, zoom])
 
   return (
     <>
