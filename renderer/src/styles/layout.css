@@ -536,6 +536,7 @@
   min-height: 0;
 }
 .doc-scroll {
+  position: relative;
   max-width: var(--doc-max-width);
   margin: 0 auto;
   padding: 48px clamp(28px, 6%, 60px) 200px;

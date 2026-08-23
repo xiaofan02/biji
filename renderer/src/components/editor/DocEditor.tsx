@@ -364,6 +364,7 @@ export function DocEditor({
   const [findIndex, setFindIndex] = useState(0)
   const [findRevision, setFindRevision] = useState(0)
   const docAreaRef = useRef<HTMLDivElement>(null)
+  const docScrollRef = useRef<HTMLDivElement>(null)
   const tableInputRef = useRef<HTMLInputElement>(null)
   const findInputRef = useRef<HTMLInputElement>(null)
   const composingRef = useRef(false) // 中文输入法组字中:防抖副作用一律不触碰可编辑区(见下方 compositionstart/end)
@@ -1268,6 +1269,7 @@ export function DocEditor({
           }}
         />
         <div
+          ref={docScrollRef}
           className={`doc-scroll${headingNumbers ? ' numbered' : ''}${reducedLineWidth ? '' : ' full-width'}`}
           style={{ zoom: documentZoom } as React.CSSProperties}
         >
@@ -1358,8 +1360,8 @@ export function DocEditor({
               suggestionMenuComponent={(props) => <SearchableSlashMenu {...props} query={slashQuery} />}
             />
           </BlockNoteView>
-          <CodeGutters scrollRef={docAreaRef} zoom={documentZoom} />
-          {headingNumbers && <HeadingNumbers scrollRef={docAreaRef} numbers={headingNums} zoom={documentZoom} />}
+          <CodeGutters scrollRef={docScrollRef} zoom={documentZoom} />
+          {headingNumbers && <HeadingNumbers scrollRef={docScrollRef} numbers={headingNums} zoom={documentZoom} />}
         </div>
         <CodeBlockCopy containerRef={docAreaRef} />
         <CodeBlockInsertAfter containerRef={docAreaRef} editor={editor} />
