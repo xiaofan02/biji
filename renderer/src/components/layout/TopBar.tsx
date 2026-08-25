@@ -9,6 +9,7 @@ import { useWorkspace } from '@/store/useWorkspace'
 import { toast } from '@/store/useToast'
 import { Icon } from '@/components/common/Icon'
 import type { SearchResult } from '@/types'
+import { importDocuments } from '@/lib/documentImport'
 
 type UpdateStatus = {
   phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
@@ -151,6 +152,9 @@ export function TopBar() {
         </button>
         <button className="icon-btn" title="新建文档 (Ctrl+N)" onClick={onNewNote}>
           <Icon name="file-plus" />
+        </button>
+        <button className="icon-btn" title="导入 Word / Markdown / HTML / 文本" onClick={() => void importDocuments()}>
+          <Icon name="upload" />
         </button>
         <button className="icon-btn" title="导入 Excel / CSV 为可编辑表格" onClick={() => window.dispatchEvent(new CustomEvent('biji:import-table'))}>
           <Icon name="table" />

@@ -35,6 +35,7 @@ import { TemplatePickerModal } from '@/components/templates/TemplatePickerModal'
 import { configureSyncInterval, pushAll } from '@/lib/sync'
 import { runDueWorkflows } from '@/lib/workflowScheduler'
 import { useWorkflows } from '@/store/useWorkflows'
+import { importDocuments } from '@/lib/documentImport'
 
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
@@ -90,6 +91,7 @@ export default function App() {
     const offs = [
       ipc.menu.on('menu:new-note', () => window.dispatchEvent(new CustomEvent('moqi:open-template-picker'))),
       ipc.menu.on('menu:quick-note', () => void quickNoteFlow()),
+      ipc.menu.on('menu:import-document', () => void importDocuments()),
       ipc.menu.on('menu:save', () => window.dispatchEvent(new CustomEvent('biji:save'))),
       ipc.menu.on('menu:find', () => window.dispatchEvent(new CustomEvent('biji:find'))),
       ipc.menu.on('menu:replace', () => window.dispatchEvent(new CustomEvent('biji:find', { detail: { replace: true } }))),

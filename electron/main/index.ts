@@ -317,6 +317,7 @@ function buildMenu(): Menu {
         { label: '新建笔记', accelerator: 'CmdOrCtrl+N', click: () => send('menu:new-note') },
         { label: '快速随手记', accelerator: 'CmdOrCtrl+Alt+N', click: () => send('menu:quick-note') },
         { label: '新建文件夹', accelerator: 'CmdOrCtrl+Shift+N', click: () => send('menu:new-folder') },
+        { label: '导入文档…', accelerator: 'CmdOrCtrl+Shift+I', click: () => send('menu:import-document') },
         { type: 'separator' },
         { label: '保存', accelerator: 'CmdOrCtrl+S', click: () => send('menu:save') },
         {
@@ -887,6 +888,19 @@ ipcMain.handle('sys:choose-file', async () => {
   const r = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'] })
   return r.canceled ? null : r.filePaths[0]
 })
+ipcMain.handle('sys:choose-documents', async () => {
+  if (!mainWindow) return []
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '可导入文档', extensions: ['docx', 'md', 'markdown', 'html', 'htm', 'txt'] },
+      { name: 'Word 文档', extensions: ['docx'] },
+      { name: 'Markdown', extensions: ['md', 'markdown'] },
+      { name: '网页与文本', extensions: ['html', 'htm', 'txt'] }
+    ]
+  })
+  return r.canceled ? [] : r.filePaths
+})
 ipcMain.handle('sys:choose-session-files', async () => {
   if (!mainWindow) return []
   const r = await dialog.showOpenDialog(mainWindow, {
@@ -933,6 +947,7 @@ ipcMain.handle('sys:choose-folder', async () => {
   return r.canceled ? null : r.filePaths[0]
 })
 ipcMain.handle('sys:read-file', (_e, p: string) => fsp.readFile(p, 'utf-8'))
+ipcMain.handle('sys:read-binary', async (_e, p: string) => new Uint8Array(await fsp.readFile(p)))
 
 // ============ IPC: 导出 ============
 // 文本类导出(Markdown / Word-HTML):弹保存对话框后写文件

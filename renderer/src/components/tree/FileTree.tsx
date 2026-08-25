@@ -17,6 +17,7 @@ import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
 import { dirname, joinPath } from '@/lib/util'
 import { Icon, type IconName } from '@/components/common/Icon'
 import { localToVirtual, relocateNode, removeNode } from '@/lib/sync'
+import { importDocuments } from '@/lib/documentImport'
 
 function withoutTeamNodes(nodes: TreeNode[], teamPaths: Set<string>): TreeNode[] {
   return nodes.flatMap((node) => {
@@ -113,7 +114,8 @@ function nodeMenu(node: TreeNode): MenuItem[] {
   if (node.type === 'dir') {
     items.push(
       { label: '新建文档', iconName: 'file-plus', onClick: () => opNewDoc(dir) },
-      { label: '新建文件夹', iconName: 'folder-plus', onClick: () => opNewFolder(dir) }
+      { label: '新建文件夹', iconName: 'folder-plus', onClick: () => opNewFolder(dir) },
+      { label: '导入文档…', iconName: 'upload', onClick: () => void importDocuments(dir) }
     )
   }
   items.push(
@@ -127,7 +129,8 @@ function nodeMenu(node: TreeNode): MenuItem[] {
 function rootMenu(e: React.MouseEvent) {
   showContextMenu(e, [
     { label: '新建文档', iconName: 'file-plus', onClick: () => opNewDoc('') },
-    { label: '新建文件夹', iconName: 'folder-plus', onClick: () => opNewFolder('') }
+    { label: '新建文件夹', iconName: 'folder-plus', onClick: () => opNewFolder('') },
+    { label: '导入文档…', iconName: 'upload', onClick: () => void importDocuments('') }
   ])
 }
 

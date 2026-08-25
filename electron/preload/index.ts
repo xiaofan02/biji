@@ -119,11 +119,13 @@ const api = {
       ipcRenderer.invoke('sys:open-data-file', name, dataUrl) as Promise<boolean>,
     showInFolder: (p: string) => ipcRenderer.invoke('sys:show-in-folder', p),
     chooseFile: () => ipcRenderer.invoke('sys:choose-file'),
+    chooseDocuments: () => ipcRenderer.invoke('sys:choose-documents') as Promise<string[]>,
     chooseSessionFiles: () => ipcRenderer.invoke('sys:choose-session-files') as Promise<string[]>,
     chooseSessionFolder: () => ipcRenderer.invoke('sys:choose-session-folder') as Promise<{ root: string; files: string[] } | null>,
     chooseFolder: () => ipcRenderer.invoke('sys:choose-folder'),
     chooseImage: () => ipcRenderer.invoke('sys:choose-image'),
-    readFile: (p: string) => ipcRenderer.invoke('sys:read-file', p)
+    readFile: (p: string) => ipcRenderer.invoke('sys:read-file', p),
+    readBinary: (p: string) => ipcRenderer.invoke('sys:read-binary', p) as Promise<Uint8Array>
   },
   exporter: {
     saveText: (defaultName: string, content: string, filters: { name: string; extensions: string[] }[]) =>
