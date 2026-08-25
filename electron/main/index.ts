@@ -21,6 +21,7 @@ const store = new Store({
     workspace: join(app.getPath('documents'), 'BijiNotes'),
     theme: 'light',
     fontSize: 16,
+    documentLineHeight: 1.6,
     documentZoom: 1,
     pageZoomFactor: 1,
     terminalFontSize: 16,

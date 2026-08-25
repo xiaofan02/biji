@@ -4,6 +4,7 @@ import { api, ApiError } from '@/lib/api'
 import { saveDoc } from '@/lib/note'
 import { materializeCloudAssets, prepareDocForUpload } from '@/lib/cloudAssets'
 import { migrateLocalLibrary, type MigrateResult } from '@/lib/migrate'
+import { isTeamSpacePath } from '@/lib/teamPaths'
 import { useAuth } from '@/store/useAuth'
 import { useSettings } from '@/store/useSettings'
 import type { BijiDoc, TreeNode } from '@/types'
@@ -133,7 +134,10 @@ async function ensureNode(vpath: string): Promise<void> {
     const cur = parent ? `${parent}/${name}` : name
     if (!knownNodes.has(cur)) {
       try {
-        await withTimeout(api.createNode(parent, name, i === parts.length - 1 ? 'file' : 'dir'), 8000)
+        await withTimeout(
+          api.createNode(parent, name, i === parts.length - 1 ? 'file' : 'dir', isTeamSpacePath(cur) ? 'team' : 'private'),
+          8000
+        )
       } catch (e) {
         if (!(e instanceof ApiError && e.status === 409)) throw e // 409=已存在
       }

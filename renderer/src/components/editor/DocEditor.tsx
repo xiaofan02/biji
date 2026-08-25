@@ -1415,6 +1415,7 @@ function HeadingNumbers({
   numbers: string[]
   zoom: number
 }) {
+  const documentLineHeight = useSettings((s) => s.documentLineHeight)
   type N = { key: number; top: number; left: number; width: number; height: number; fontSize: string; text: string }
   const [items, setItems] = useState<N[]>([])
   useEffect(() => {
@@ -1461,7 +1462,7 @@ function HeadingNumbers({
       mo.disconnect()
       ro.disconnect()
     }
-  }, [scrollRef, numbers, zoom])
+  }, [scrollRef, numbers, zoom, documentLineHeight])
 
   return (
     <>
@@ -1811,6 +1812,7 @@ function CodeSelectionColorToolbar({
 }
 
 function CodeGutters({ scrollRef, zoom }: { scrollRef: React.RefObject<HTMLDivElement | null>; zoom: number }) {
+  const documentLineHeight = useSettings((s) => s.documentLineHeight)
   type G = {
     key: string
     top: number
@@ -1870,7 +1872,7 @@ function CodeGutters({ scrollRef, zoom }: { scrollRef: React.RefObject<HTMLDivEl
       mo.disconnect()
       ro.disconnect()
     }
-  }, [scrollRef, zoom])
+  }, [scrollRef, zoom, documentLineHeight])
 
   return (
     <>

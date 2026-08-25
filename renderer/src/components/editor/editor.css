@@ -25,7 +25,7 @@
 
 .doc-scroll .ProseMirror {
   font-size: var(--editor-font-size, 16px);
-  line-height: 1.78;
+  line-height: var(--document-line-height, 1.6);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-weight: 400;
@@ -178,7 +178,7 @@
 /* 段落 */
 .doc-scroll [data-content-type='paragraph'] {
   color: var(--text);
-  line-height: 1.78;
+  line-height: var(--document-line-height, 1.6);
   overflow-wrap: anywhere;
 }
 
@@ -265,12 +265,12 @@
   text-indent: 0;
   font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
   font-size: 13.5px;
-  line-height: 1.7;
+  line-height: var(--document-code-line-height, 1.48);
 }
 .doc-scroll [data-content-type='codeBlock'] code {
   font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
   font-size: 13.5px;
-  line-height: 1.7;
+  line-height: var(--document-code-line-height, 1.48);
   text-indent: 0;
   /* 关键修复:全局 global.css 的 code{padding:1px 5px}(给行内代码用)会泄漏到代码块的
      <code>。该 <code> 是 display:inline,inline 元素的 padding-left 只作用于整段起点(=首行行首)、
@@ -614,7 +614,7 @@
 .doc-scroll .biji-codenote {
   font-family: 'Cascadia Code', 'Fira Code', Consolas, Menlo, monospace;
   font-size: 13.5px;
-  line-height: 1.7;
+  line-height: var(--document-code-line-height, 1.48);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -643,7 +643,7 @@
 .doc-scroll [data-content-type='bulletListItem'],
 .doc-scroll [data-content-type='numberedListItem'],
 .doc-scroll [data-content-type='checkListItem'] {
-  line-height: 1.72;
+  line-height: var(--document-line-height, 1.6);
   padding-block: 1px;
 }
 .doc-scroll [data-content-type='bulletListItem']::marker,

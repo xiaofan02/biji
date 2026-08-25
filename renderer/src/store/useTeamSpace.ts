@@ -2,12 +2,13 @@ import { create } from 'zustand'
 import type { TreeNode } from '@/types'
 import { api } from '@/lib/api'
 import { ipc } from '@/lib/ipc'
+import { TEAM_ROOT } from '@/lib/teamPaths'
 import { useAuth } from '@/store/useAuth'
 
 function onlyTeam(nodes: TreeNode[], insideTeamRoot = false): TreeNode[] {
   const result: TreeNode[] = []
   for (const node of nodes) {
-    const isTeamRoot = node.path === '团队空间'
+    const isTeamRoot = node.path === TEAM_ROOT
     const inDedicatedSpace = insideTeamRoot || isTeamRoot
     const children = node.children ? onlyTeam(node.children, inDedicatedSpace) : []
     // 团队页本身已经表达了空间范围，不再重复显示一层“团队空间”根目录。
@@ -15,7 +16,11 @@ function onlyTeam(nodes: TreeNode[], insideTeamRoot = false): TreeNode[] {
       result.push(...children)
       continue
     }
-    if (node.visibility === 'team' && (node.type === 'file' || inDedicatedSpace)) {
+    if (inDedicatedSpace) {
+      // 专用目录内的历史节点可能由旧版“上传全部”创建成 private。
+      // 团队页仍须完整展示；refresh 时会把服务器端范围一并迁移为 team。
+      result.push({ ...node, visibility: 'team', children })
+    } else if (node.visibility === 'team' && node.type === 'file') {
       result.push({ ...node, children })
     } else {
       // 私人目录只是团队内容在服务器树中的路径容器，不能出现在团队资料树里。
@@ -26,18 +31,24 @@ function onlyTeam(nodes: TreeNode[], insideTeamRoot = false): TreeNode[] {
   return result
 }
 
-function collectTeamPaths(nodes: TreeNode[], out: string[] = []): string[] {
+function collectTeamPaths(nodes: TreeNode[], out: string[] = [], insideTeamRoot = false): string[] {
   for (const node of nodes) {
-    if (node.visibility === 'team') out.push(node.path)
-    if (node.children) collectTeamPaths(node.children, out)
+    const inDedicatedSpace = insideTeamRoot || node.path === TEAM_ROOT
+    if (node.visibility === 'team' || inDedicatedSpace) out.push(node.path)
+    if (node.children) collectTeamPaths(node.children, out, inDedicatedSpace)
   }
   return out
 }
 
-function collectAccess(nodes: TreeNode[], out = new Map<string, 'view' | 'edit'>()): Map<string, 'view' | 'edit'> {
+function collectAccess(
+  nodes: TreeNode[],
+  out = new Map<string, 'view' | 'edit'>(),
+  insideTeamRoot = false
+): Map<string, 'view' | 'edit'> {
   for (const node of nodes) {
-    if (node.visibility === 'team' && node.accessLevel) out.set(node.path, node.accessLevel)
-    if (node.children) collectAccess(node.children, out)
+    const inDedicatedSpace = insideTeamRoot || node.path === TEAM_ROOT
+    if ((node.visibility === 'team' || inDedicatedSpace) && node.accessLevel) out.set(node.path, node.accessLevel)
+    if (node.children) collectAccess(node.children, out, inDedicatedSpace)
   }
   return out
 }

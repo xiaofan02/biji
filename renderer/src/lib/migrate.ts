@@ -2,6 +2,7 @@ import { ipc } from '@/lib/ipc'
 import { api } from '@/lib/api'
 import { useSettings } from '@/store/useSettings'
 import { prepareDocForUpload } from '@/lib/cloudAssets'
+import { isTeamSpacePath } from '@/lib/teamPaths'
 import type { TreeNode } from '@/types'
 
 export interface MigrateResult {
@@ -60,7 +61,7 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
           res.skipped++
         } else {
           try {
-            const node = await api.createNode(parentVirtual, n.name, 'dir')
+            const node = await api.createNode(parentVirtual, n.name, 'dir', isTeamSpacePath(vpath) ? 'team' : 'private')
             serverPaths.add(node.path)
             res.dirs++
             onProgress?.(`文件夹 ${vpath}`)
@@ -81,7 +82,7 @@ export async function migrateLocalLibrary(onProgress?: (msg: string) => void): P
           let targetPath = vpath
           let nodeId: string
           if (!serverPaths.has(vpath)) {
-            const node = await api.createNode(parentVirtual, n.name, 'file')
+            const node = await api.createNode(parentVirtual, n.name, 'file', isTeamSpacePath(vpath) ? 'team' : 'private')
             targetPath = node.path
             nodeId = node.id as string
             serverPaths.add(targetPath)

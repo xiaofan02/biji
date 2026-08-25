@@ -38,6 +38,7 @@ import { useWorkflows } from '@/store/useWorkflows'
 
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
+  const documentLineHeight = useSettings((s) => s.documentLineHeight)
   const loaded = useSettings((s) => s.loaded)
   const syncIntervalHours = useSettings((s) => s.syncIntervalHours)
 
@@ -62,6 +63,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--editor-font-size', fontSize + 'px')
   }, [fontSize])
+
+  // 笔记行间距只作用于编辑内容，不缩放应用菜单和侧栏。代码块略紧凑，长配置更易扫读。
+  useEffect(() => {
+    document.documentElement.style.setProperty('--document-line-height', String(documentLineHeight))
+    document.documentElement.style.setProperty('--document-code-line-height', String(Math.max(1.2, documentLineHeight - 0.12)))
+  }, [documentLineHeight])
 
   // 后台全量上传计划。0=暂停云端上传，但本地自动保存始终不受影响。
   useEffect(() => {

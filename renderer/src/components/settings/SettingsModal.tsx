@@ -57,6 +57,8 @@ function GeneralPane() {
   const setTheme = useSettings((s) => s.setTheme)
   const fontSize = useSettings((s) => s.fontSize)
   const setFontSize = useSettings((s) => s.setFontSize)
+  const documentLineHeight = useSettings((s) => s.documentLineHeight)
+  const setDocumentLineHeight = useSettings((s) => s.setDocumentLineHeight)
   const reducedLineWidth = useSettings((s) => s.reducedLineWidth)
   const setReducedLineWidth = useSettings((s) => s.setReducedLineWidth)
   const terminalFontSize = useSettings((s) => s.terminalFontSize)
@@ -103,6 +105,28 @@ function GeneralPane() {
       <div className="form-group">
         <label>编辑器字号</label>
         <input type="number" min={12} max={28} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value) || 16)} />
+      </div>
+      <div className="form-group">
+        <div className="setting-value-head">
+          <label>笔记行间距</label>
+          <span>{documentLineHeight.toFixed(2)}</span>
+        </div>
+        <input
+          className="setting-range"
+          type="range"
+          min={1.2}
+          max={2.2}
+          step={0.05}
+          value={documentLineHeight}
+          onChange={(e) => void setDocumentLineHeight(Number(e.target.value))}
+          aria-label="笔记行间距"
+        />
+        <div className="setting-range-labels" aria-hidden="true">
+          <span>紧凑</span>
+          <span>标准</span>
+          <span>宽松</span>
+        </div>
+        <small>调整正文、列表和代码块的行距，设置会立即生效并自动保存。</small>
       </div>
       <div className="form-group setting-switch-row">
         <div>

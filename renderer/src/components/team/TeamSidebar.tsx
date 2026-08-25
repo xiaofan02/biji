@@ -17,9 +17,9 @@ import { confirm } from '@/store/useConfirm'
 import { showContextMenu } from '@/store/useContextMenu'
 import { toast } from '@/store/useToast'
 import { suppressSave, unsuppressSave } from '@/lib/saveGuard'
+import { TEAM_ROOT } from '@/lib/teamPaths'
 import { Icon } from '@/components/common/Icon'
 
-const TEAM_ROOT = '团队空间'
 let draggedTeamNode: TreeNode | null = null
 
 async function ensureTeamRoot(workspace: string): Promise<void> {
@@ -149,8 +149,12 @@ export function TeamSidebar() {
   }
 
   useEffect(() => {
-    void useTeamSpace.getState().init().then(refresh)
-  }, [status])
+    if (status !== 'in' || !workspace) return
+    void useTeamSpace.getState().init()
+      .then(() => ensureTeamRoot(workspace))
+      .then(refresh)
+      .catch((error) => toast('团队空间加载失败：' + (error as Error).message, 'error'))
+  }, [status, workspace])
 
   const openNode = async (node: TreeNode) => {
     try {
