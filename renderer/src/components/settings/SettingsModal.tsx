@@ -6,6 +6,7 @@ import { useWorkspace } from '@/store/useWorkspace'
 import { useProviders } from '@/store/useProviders'
 import { toast } from '@/store/useToast'
 import { normalizeSSHHost } from '@/lib/hosts'
+import { clearWebAILogin, openWebAI, WEB_AI_PROVIDERS } from '@/lib/webAI'
 import type { AIProvider, AIProviderType, SSHHost, TelnetHost } from '@/types'
 import './settings.css'
 
@@ -101,6 +102,25 @@ function GeneralPane() {
           <option value="paper">书页护眼</option>
           <option value="dark">深色</option>
         </select>
+      </div>
+      <div className="form-group">
+        <label>网页 AI 中心</label>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {WEB_AI_PROVIDERS.map((provider) => (
+            <div key={provider.id} className="row gap" style={{ justifyContent: 'space-between' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600 }}>{provider.label}</div>
+                <small>{provider.description}</small>
+              </div>
+              <div className="row gap">
+                <button className="btn" onClick={() => void openWebAI(provider.id, '')}>打开</button>
+                <button className="btn" onClick={() => void clearWebAILogin(provider.id)}>退出登录</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button className="btn danger" style={{ marginTop: 10 }} onClick={() => void clearWebAILogin()}>清除全部登录</button>
+        <small>无需 API Key。每个服务都在独立安全窗口中使用；登录信息只保存在当前电脑，不会打进安装包，也不会共享给其他用户。ChatGPT 与 Codex 共用 OpenAI 登录。</small>
       </div>
       <div className="form-group">
         <label>编辑器字号</label>

@@ -10,6 +10,14 @@ import { toast } from '@/store/useToast'
 import { Icon } from '@/components/common/Icon'
 import type { SearchResult } from '@/types'
 import { importDocuments } from '@/lib/documentImport'
+import { showContextMenu } from '@/store/useContextMenu'
+import {
+  appendWebAIClipboardToNote,
+  captureWebAISelection,
+  clearWebAILogin,
+  openWebAI,
+  WEB_AI_PROVIDERS
+} from '@/lib/webAI'
 
 type UpdateStatus = {
   phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
@@ -34,6 +42,7 @@ export function TopBar() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ phase: 'idle', currentVersion: '' })
   const inputRef = useRef<HTMLInputElement>(null)
   const updatePhaseRef = useRef(updateStatus.phase)
+  const webAISelectionRef = useRef('')
 
   useEffect(() => {
     void ipc.update.getStatus().then((status) => setUpdateStatus(status as UpdateStatus))
@@ -158,6 +167,26 @@ export function TopBar() {
         </button>
         <button className="icon-btn" title="导入 Excel / CSV 为可编辑表格" onClick={() => window.dispatchEvent(new CustomEvent('biji:import-table'))}>
           <Icon name="table" />
+        </button>
+        <button
+          className="icon-btn"
+          title="网页 AI 中心：选择 ChatGPT、Gemini、豆包或 Codex"
+          onMouseDown={() => { webAISelectionRef.current = captureWebAISelection() }}
+          onClick={(event) => showContextMenu(event, [
+            ...WEB_AI_PROVIDERS.map((provider) => ({
+              label: `打开 ${provider.label}`,
+              iconName: provider.id === 'codex' ? 'terminal' as const : 'sparkles' as const,
+              onClick: () => {
+                const selection = webAISelectionRef.current
+                webAISelectionRef.current = ''
+                void openWebAI(provider.id, selection)
+              }
+            })),
+            { label: '把剪贴板内容追加到当前笔记', iconName: 'file-plus', onClick: () => void appendWebAIClipboardToNote() },
+            { label: '清除全部网页 AI 登录状态', iconName: 'trash', danger: true, onClick: () => void clearWebAILogin() }
+          ])}
+        >
+          <Icon name="sparkles" />
         </button>
         <button
           className="icon-btn"

@@ -36,6 +36,7 @@ import { configureSyncInterval, pushAll } from '@/lib/sync'
 import { runDueWorkflows } from '@/lib/workflowScheduler'
 import { useWorkflows } from '@/store/useWorkflows'
 import { importDocuments } from '@/lib/documentImport'
+import { openWebAI, type WebAIProvider } from '@/lib/webAI'
 
 export default function App() {
   const fontSize = useSettings((s) => s.fontSize)
@@ -96,6 +97,7 @@ export default function App() {
       ipc.menu.on('menu:find', () => window.dispatchEvent(new CustomEvent('biji:find'))),
       ipc.menu.on('menu:replace', () => window.dispatchEvent(new CustomEvent('biji:find', { detail: { replace: true } }))),
       ipc.menu.on('menu:export-md', () => window.dispatchEvent(new CustomEvent('biji:export-md'))),
+      ipc.menu.on('menu:web-ai', (provider) => void openWebAI(provider as WebAIProvider)),
       ipc.menu.on('menu:toggle-ai', () => {
         const ui = useUI.getState()
         ui.setQuickAiOpen(!ui.quickAiOpen)

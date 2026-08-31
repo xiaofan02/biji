@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage, globalShortcut } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage, globalShortcut, session, clipboard } from 'electron'
 import { join, dirname, extname, relative, isAbsolute, resolve, sep } from 'path'
 import fs from 'fs'
 import fsp from 'fs/promises'
@@ -42,6 +42,162 @@ const store = new Store({
 
 let mainWindow: BrowserWindow | null = null
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+type WebAIProvider = 'chatgpt' | 'codex' | 'gemini' | 'doubao'
+type WebAIConfig = {
+  label: string
+  url: string
+  partition: string
+  hosts: string[]
+}
+
+const OPENAI_AUTH_HOSTS = [
+  'chatgpt.com',
+  'openai.com',
+  'accounts.google.com',
+  'appleid.apple.com',
+  'login.microsoftonline.com',
+  'login.live.com'
+]
+
+const WEB_AI_CONFIGS: Record<WebAIProvider, WebAIConfig> = {
+  chatgpt: {
+    label: 'ChatGPT',
+    url: 'https://chatgpt.com/',
+    partition: 'persist:moqi-chatgpt',
+    hosts: OPENAI_AUTH_HOSTS
+  },
+  codex: {
+    label: 'Codex',
+    url: 'https://chatgpt.com/codex/',
+    partition: 'persist:moqi-chatgpt',
+    hosts: OPENAI_AUTH_HOSTS
+  },
+  gemini: {
+    label: 'Gemini',
+    url: 'https://gemini.google.com/app',
+    partition: 'persist:moqi-gemini',
+    hosts: ['gemini.google.com', 'accounts.google.com']
+  },
+  doubao: {
+    label: '豆包',
+    url: 'https://www.doubao.com/chat/',
+    partition: 'persist:moqi-doubao',
+    hosts: ['doubao.com']
+  }
+}
+
+const webAIWindows = new Map<WebAIProvider, BrowserWindow>()
+
+function webAIConfig(provider: string): WebAIConfig & { provider: WebAIProvider } {
+  if (!(provider in WEB_AI_CONFIGS)) throw new Error('不支持的网页 AI 服务')
+  const key = provider as WebAIProvider
+  return { provider: key, ...WEB_AI_CONFIGS[key] }
+}
+
+function isWebAIHost(host: string, allowedHosts: string[]): boolean {
+  const normalized = host.toLowerCase()
+  return allowedHosts.some((allowed) => normalized === allowed || normalized.endsWith(`.${allowed}`))
+}
+
+function isWebAINavigation(rawUrl: string, config: WebAIConfig): boolean {
+  try {
+    const target = new URL(rawUrl)
+    return target.protocol === 'https:' && isWebAIHost(target.hostname, config.hosts)
+  } catch {
+    return false
+  }
+}
+
+function secureWebAIPopupOptions(config: WebAIConfig): Electron.BrowserWindowConstructorOptions {
+  return {
+    autoHideMenuBar: true,
+    backgroundColor: '#111827',
+    webPreferences: {
+      partition: config.partition,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true
+    }
+  }
+}
+
+function closeWebAIWindows(provider?: WebAIProvider): void {
+  const configs = provider ? [WEB_AI_CONFIGS[provider]] : Object.values(WEB_AI_CONFIGS)
+  const sessions = new Set(configs.map((config) => session.fromPartition(config.partition)))
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win !== mainWindow && !win.isDestroyed() && sessions.has(win.webContents.session)) win.destroy()
+  }
+  if (provider) {
+    const partition = WEB_AI_CONFIGS[provider].partition
+    for (const [key] of webAIWindows) {
+      if (WEB_AI_CONFIGS[key].partition === partition) webAIWindows.delete(key)
+    }
+  } else {
+    webAIWindows.clear()
+  }
+}
+
+function createOrShowWebAI(providerName: string, copyText = ''): BrowserWindow {
+  const config = webAIConfig(providerName)
+  if (copyText.trim()) clipboard.writeText(copyText.trim())
+  const existing = webAIWindows.get(config.provider)
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    return existing
+  }
+
+  const savedBounds = store.get(`webAIBounds.${config.provider}`) as Partial<Electron.Rectangle> | undefined
+  const win = new BrowserWindow({
+    ...secureWebAIPopupOptions(config),
+    width: savedBounds?.width || 480,
+    height: savedBounds?.height || 760,
+    x: savedBounds?.x,
+    y: savedBounds?.y,
+    minWidth: 390,
+    minHeight: 560,
+    show: false,
+    title: `${config.label} · 墨启 MOQI 网页 AI`,
+    icon: join(app.getAppPath(), 'build', 'icon.png')
+  })
+  webAIWindows.set(config.provider, win)
+
+  const userAgent = win.webContents.getUserAgent().replace(/\sElectron\/\S+/i, '').replace(/\smoqi\/\S+/i, '')
+  win.webContents.setUserAgent(userAgent)
+  // 仅允许网页把回答复制到系统剪贴板；摄像头、麦克风、定位和文件系统等权限全部拒绝。
+  win.webContents.session.setPermissionCheckHandler((_webContents, permission) => permission === 'clipboard-sanitized-write')
+  win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'clipboard-sanitized-write')
+  })
+
+  const guardNavigation = (event: Electron.Event, targetUrl: string) => {
+    if (isWebAINavigation(targetUrl, config)) return
+    event.preventDefault()
+    if (/^https?:/i.test(targetUrl)) void shell.openExternal(targetUrl)
+  }
+  win.webContents.on('will-navigate', guardNavigation)
+  win.webContents.on('will-redirect', guardNavigation)
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isWebAINavigation(url, config)) {
+      return { action: 'allow', overrideBrowserWindowOptions: secureWebAIPopupOptions(config) }
+    }
+    if (/^https?:/i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
+  win.once('ready-to-show', () => win.show())
+  win.on('close', () => {
+    if (!win.isDestroyed()) store.set(`webAIBounds.${config.provider}`, win.getBounds())
+  })
+  win.on('closed', () => {
+    if (webAIWindows.get(config.provider) === win) webAIWindows.delete(config.provider)
+  })
+  void win.loadURL(config.url)
+  return win
+}
 
 app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -244,6 +400,7 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     if (revealTimer) clearTimeout(revealTimer)
+    closeWebAIWindows()
     mainWindow = null
     closeAllSessions()
   })
@@ -354,6 +511,15 @@ function buildMenu(): Menu {
       label: '视图',
       submenu: [
         { label: '导出 Markdown', accelerator: 'CmdOrCtrl+Shift+E', click: () => send('menu:export-md') },
+        {
+          label: '网页 AI 中心',
+          submenu: [
+            { label: 'ChatGPT', accelerator: 'CmdOrCtrl+Shift+G', click: () => send('menu:web-ai', 'chatgpt') },
+            { label: 'Gemini', click: () => send('menu:web-ai', 'gemini') },
+            { label: '豆包', click: () => send('menu:web-ai', 'doubao') },
+            { label: 'Codex（编程）', click: () => send('menu:web-ai', 'codex') }
+          ]
+        },
         { label: 'AI 助手', accelerator: 'CmdOrCtrl+I', click: () => send('menu:toggle-ai') },
         { label: '远程终端', accelerator: 'CmdOrCtrl+T', click: () => send('menu:toggle-terminal') },
         { type: 'separator' },
@@ -830,6 +996,26 @@ ipcMain.handle('ai:test', (_e, provider: AIProvider) => ai.test(provider))
 registerRemoteHandlers(ipcMain)
 
 // ============ IPC: System ============
+ipcMain.handle('web-ai:open', (_e, provider: string, copyText?: string) => {
+  const text = typeof copyText === 'string' ? copyText.trim() : ''
+  const config = webAIConfig(provider)
+  createOrShowWebAI(config.provider, text)
+  return { copied: Boolean(text) }
+})
+ipcMain.handle('web-ai:read-clipboard', () => clipboard.readText())
+ipcMain.handle('web-ai:clear-session', async (_e, provider?: string) => {
+  const configs = provider ? [webAIConfig(provider)] : Object.values(WEB_AI_CONFIGS)
+  if (provider) closeWebAIWindows(webAIConfig(provider).provider)
+  else closeWebAIWindows()
+  const partitions = [...new Set(configs.map((config) => config.partition))]
+  for (const partition of partitions) {
+    const webSession = session.fromPartition(partition)
+    await webSession.clearStorageData()
+    await webSession.clearCache()
+  }
+  return true
+})
+
 ipcMain.handle('sys:open-external', (_e, url: string) => shell.openExternal(url))
 ipcMain.handle('sys:open-path', async (_e, p: string) => {
   const target = workspacePath(p, false)

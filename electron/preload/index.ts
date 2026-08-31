@@ -111,6 +111,13 @@ const api = {
       return () => ipcRenderer.removeListener(channel, listener)
     }
   },
+  webAI: {
+    open: (provider: 'chatgpt' | 'codex' | 'gemini' | 'doubao', copyText?: string) =>
+      ipcRenderer.invoke('web-ai:open', provider, copyText) as Promise<{ copied: boolean }>,
+    readClipboard: () => ipcRenderer.invoke('web-ai:read-clipboard') as Promise<string>,
+    clearSession: (provider?: 'chatgpt' | 'codex' | 'gemini' | 'doubao') =>
+      ipcRenderer.invoke('web-ai:clear-session', provider) as Promise<boolean>
+  },
   sys: {
     setWindowTheme: (theme: 'light' | 'paper' | 'dark') => ipcRenderer.invoke('window:set-theme', theme),
     openExternal: (url: string) => ipcRenderer.invoke('sys:open-external', url),
