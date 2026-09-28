@@ -21,6 +21,21 @@ export interface StepResult {
   error?: string
 }
 
+export interface WorkflowLogEntry {
+  at: number
+  stepId: string
+  message: string
+}
+
+export interface WorkflowRunOptions {
+  signal?: AbortSignal
+  onLog?: (entry: WorkflowLogEntry) => void
+}
+
+function checkCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('运行已取消', 'AbortError')
+}
+
 function stripAnsi(s: string): string {
   return s
     // eslint-disable-next-line no-control-regex
@@ -68,7 +83,7 @@ function cfgOf(leaf: HostLeaf): any {
 }
 
 // 收集终端输出直到「静默 idleMs」或达到 maxMs 上限
-function collectUntilIdle(id: string, idleMs: number, maxMs: number): Promise<string> {
+function collectUntilIdle(id: string, idleMs: number, maxMs: number, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve) => {
     let buf = ''
     let done = false
@@ -79,6 +94,7 @@ function collectUntilIdle(id: string, idleMs: number, maxMs: number): Promise<st
       clearTimeout(idleTimer)
       clearTimeout(maxTimer)
       off()
+      signal?.removeEventListener('abort', finish)
       resolve(buf)
     }
     const off = ipc.term.onData(id, (data: string) => {
@@ -88,57 +104,75 @@ function collectUntilIdle(id: string, idleMs: number, maxMs: number): Promise<st
     })
     idleTimer = setTimeout(finish, idleMs)
     const maxTimer = setTimeout(finish, maxMs)
+    signal?.addEventListener('abort', finish, { once: true })
+    if (signal?.aborted) finish()
   })
 }
 
-async function runStep(step: WorkflowStep, leaf: HostLeaf): Promise<StepResult> {
+async function runStep(step: WorkflowStep, leaf: HostLeaf, options: WorkflowRunOptions): Promise<StepResult> {
+  checkCancelled(options.signal)
   const cfg = cfgOf(leaf)
   const conn = (leaf.kind === 'ssh' ? await ipc.ssh.connect(cfg) : await ipc.telnet.connect(cfg)) as { id: string }
   const id = conn.id
   const write = (data: string) => (leaf.kind === 'ssh' ? ipc.ssh.write(id, data) : ipc.telnet.write(id, data))
   let output = ''
   try {
+    checkCancelled(options.signal)
     // 等初始 banner/登录提示符静默下来
-    await collectUntilIdle(id, 1500, 8000)
+    await collectUntilIdle(id, 1500, 8000, options.signal)
+    checkCancelled(options.signal)
     const cmds = step.commands
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
     for (const cmd of cmds) {
-      write(cmd + '\n')
-      const out = await collectUntilIdle(id, 1500, 30000)
+      checkCancelled(options.signal)
+      options.onLog?.({ at: Date.now(), stepId: step.id, message: `发送命令：${cmd}` })
+      await write(cmd + '\n')
+      checkCancelled(options.signal)
+      const out = await collectUntilIdle(id, 1500, 30000, options.signal)
       output += `$ ${cmd}\n${stripAnsi(out).trim()}\n\n`
+      checkCancelled(options.signal)
     }
   } finally {
-    if (leaf.kind === 'ssh') ipc.ssh.close(id)
-    else ipc.telnet.close(id)
+    if (leaf.kind === 'ssh') void ipc.ssh.close(id)
+    else void ipc.telnet.close(id)
   }
   return { stepId: step.id, title: step.title, host: leaf.name, output: output.trim() }
 }
 
 export async function runWorkflow(
   wf: Workflow,
-  onProgress: (stepId: string, status: 'running' | 'done' | 'error', result?: StepResult) => void
+  onProgress: (stepId: string, status: 'running' | 'done' | 'error' | 'cancelled', result?: StepResult) => void,
+  options: WorkflowRunOptions = {}
 ): Promise<StepResult[]> {
+  checkCancelled(options.signal)
   const hosts = await loadWorkflowHosts()
   const results: StepResult[] = []
   for (const step of wf.steps) {
+    if (options.signal?.aborted) break
     onProgress(step.id, 'running')
+    options.onLog?.({ at: Date.now(), stepId: step.id, message: `开始步骤：${step.title}` })
     const leaf = hosts.find((h) => h.id === step.hostId)
     if (!leaf) {
       const r: StepResult = { stepId: step.id, title: step.title, host: step.hostId, output: '', error: '主机不存在(可能已删除)' }
       results.push(r)
       onProgress(step.id, 'error', r)
+      options.onLog?.({ at: Date.now(), stepId: step.id, message: r.error! })
       continue
     }
     try {
-      const r = await runStep(step, leaf)
+      const r = await runStep(step, leaf, options)
       results.push(r)
       onProgress(step.id, 'done', r)
+      options.onLog?.({ at: Date.now(), stepId: step.id, message: `步骤完成：${step.title}` })
     } catch (e) {
-      const r: StepResult = { stepId: step.id, title: step.title, host: leaf.name, output: '', error: (e as Error).message }
+      const cancelled = options.signal?.aborted
+      const r: StepResult = { stepId: step.id, title: step.title, host: leaf.name, output: '', error: cancelled ? '用户取消' : (e as Error).message }
       results.push(r)
-      onProgress(step.id, 'error', r)
+      onProgress(step.id, cancelled ? 'cancelled' : 'error', r)
+      options.onLog?.({ at: Date.now(), stepId: step.id, message: cancelled ? '运行已取消' : `步骤失败：${r.error}` })
+      if (cancelled) break
     }
   }
   return results

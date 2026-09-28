@@ -1,6 +1,6 @@
 {
   "name": "moqi",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "墨启 MOQI - 轻量智能笔记、AI 辅助与远程运维工作台",
   "main": "app-build/main/index.js",
   "author": "biji",
@@ -12,6 +12,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "smoke:collab": "node scripts/collab-smoke.mjs",
+    "smoke:server-qa": "node scripts/server-qa-smoke.mjs",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --publish never",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",

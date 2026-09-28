@@ -4,7 +4,7 @@ import { useAuth } from '@/store/useAuth'
 import { Icon, type IconName } from '@/components/common/Icon'
 
 // 左侧活动栏：资料库、团队笔记、远程终端和工作流。
-// AI 已统一为 Ctrl+Space 全局悬浮窗，不再占用主工作区或产生 AI 分屏。
+// Ctrl+Space 仍是轻量 AI 悬浮助手；网页 AI 从顶栏进入并嵌入右侧分屏。
 export function ActivityBar() {
   const activityView = useUI((s) => s.activityView)
   const sidebarCollapsed = useUI((s) => s.sidebarCollapsed)
@@ -20,7 +20,7 @@ export function ActivityBar() {
     else setActivityView(view)
     focusOrOpen('editor')
   }
-  const viewItem = (content: Exclude<PaneContent, 'editor'>, icon: IconName, title: string) => (
+  const viewItem = (content: Extract<PaneContent, 'terminal' | 'workflow'>, icon: IconName, title: string) => (
     <button
       className={`activity-item${activityView === content ? ' active' : ''}`}
       title={title}

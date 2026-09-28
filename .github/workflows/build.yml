@@ -40,6 +40,15 @@ jobs:
       - name: Build Windows installer & portable
         run: npm run dist:win
 
+      - name: Verify Windows package files
+        shell: pwsh
+        run: |
+          foreach ($pattern in @('MOQI-*-Setup.exe', 'MOQI-*-Portable.exe', 'latest.yml')) {
+            if (-not (Get-ChildItem -Path release -Filter $pattern -File -ErrorAction SilentlyContinue)) {
+              throw "Missing Windows package artifact: $pattern"
+            }
+          }
+
       - name: Verify serial component inside packaged app
         shell: pwsh
         run: |
@@ -90,6 +99,13 @@ jobs:
         run: npm run typecheck
       - name: Build Intel and Apple Silicon packages
         run: npm run dist:mac
+      - name: Verify macOS package files
+        run: |
+          test -f release/latest-mac.yml
+          for arch in x64 arm64; do
+            ls release/MOQI-*-${arch}.dmg >/dev/null
+            ls release/MOQI-*-${arch}.zip >/dev/null
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: moqi-macos

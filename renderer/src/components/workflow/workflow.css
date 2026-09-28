@@ -164,6 +164,7 @@
 .wf-step-status.error {
   color: #e54545;
 }
+.wf-step-status.cancelled { color: var(--text-tertiary); }
 .wf-step-del {
   border: none;
   background: transparent;
@@ -222,6 +223,12 @@
 .wf-history-item > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .wf-history-item small { grid-column: 2; color: var(--text-tertiary); font-size: 9px; }
 .wf-history-dot { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: #2ea043; }.wf-history-dot.partial { background: #d99000; }.wf-history-dot.failed { background: #e5484d; }
+.wf-history-dot.cancelled { background: var(--text-tertiary); }
+.wf-cancel { color: #e54545; }
+.wf-run-log { margin: 12px 16px 0; border: 1px solid var(--border-light); border-radius: 9px; background: var(--bg-input); }
+.wf-run-log-head { padding: 8px 10px; font-size: 12px; font-weight: 600; color: var(--text); border-bottom: 1px solid var(--border-light); }
+.wf-run-log-body { max-height: 130px; overflow: auto; padding: 7px 10px; font: 11px/1.6 'Cascadia Code', Consolas, monospace; color: var(--text-secondary); }
+.wf-run-log-body time { color: var(--text-tertiary); }
 .wf-schedule { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 16px 0; padding: 9px 12px; border: 1px solid var(--border-light); border-radius: 9px; background: var(--bg-input); }
 .wf-schedule label { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12px; }.wf-schedule input[type='checkbox'] { accent-color: var(--accent); }
 .wf-schedule select, .wf-schedule input[type='time'] { height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11px; }

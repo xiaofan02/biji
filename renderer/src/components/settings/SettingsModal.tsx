@@ -54,6 +54,7 @@ export function SettingsModal() {
 }
 
 function GeneralPane() {
+  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   const theme = useSettings((s) => s.theme)
   const setTheme = useSettings((s) => s.setTheme)
   const fontSize = useSettings((s) => s.fontSize)
@@ -113,14 +114,14 @@ function GeneralPane() {
                 <small>{provider.description}</small>
               </div>
               <div className="row gap">
-                <button className="btn" onClick={() => void openWebAI(provider.id, '')}>打开</button>
+                <button className="btn" onClick={() => { openWebAI(provider.id, ''); setSettingsOpen(false) }}>打开</button>
                 <button className="btn" onClick={() => void clearWebAILogin(provider.id)}>退出登录</button>
               </div>
             </div>
           ))}
         </div>
         <button className="btn danger" style={{ marginTop: 10 }} onClick={() => void clearWebAILogin()}>清除全部登录</button>
-        <small>无需 API Key。每个服务都在独立安全窗口中使用；登录信息只保存在当前电脑，不会打进安装包，也不会共享给其他用户。ChatGPT 与 Codex 共用 OpenAI 登录。</small>
+        <small>无需 API Key。服务会嵌入主界面右侧，并使用相互隔离的安全登录会话；登录信息只保存在当前电脑，不会打进安装包，也不会共享给其他用户。ChatGPT 与 Codex 共用 OpenAI 登录。</small>
       </div>
       <div className="form-group">
         <label>编辑器字号</label>

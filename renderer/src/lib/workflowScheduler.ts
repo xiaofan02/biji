@@ -1,5 +1,5 @@
 import { ipc } from '@/lib/ipc'
-import { runWorkflow } from '@/lib/runWorkflow'
+import { runWorkflow, type WorkflowLogEntry } from '@/lib/runWorkflow'
 import { createDoc, emptyDoc, saveDoc } from '@/lib/note'
 import { pushDoc } from '@/lib/sync'
 import { joinPath } from '@/lib/util'
@@ -48,19 +48,21 @@ export async function runDueWorkflows(): Promise<void> {
     if (!due(workflow, now) || running.has(workflow.id)) continue
     running.add(workflow.id)
     const startedAt = Date.now()
+    const logs: WorkflowLogEntry[] = []
     try {
-      const results = await runWorkflow(workflow, () => undefined)
+      const results = await runWorkflow(workflow, () => undefined, { onLog: (entry) => logs.push(entry) })
       const failed = results.filter((item) => item.error).length
       useWorkflows.getState().addRun({
         id: crypto.randomUUID(), workflowId: workflow.id, workflowName: workflow.name,
-        startedAt, finishedAt: Date.now(), status: failed === 0 ? 'success' : failed === results.length ? 'failed' : 'partial', results
+        startedAt, finishedAt: Date.now(), status: failed === 0 ? 'success' : failed === results.length ? 'failed' : 'partial', results, logs
       })
       useWorkflows.getState().upsert({ ...workflow, schedule: { ...workflow.schedule!, lastRunAt: Date.now() }, updatedAt: Date.now() })
       await saveAutomaticReport(workflow, results)
     } catch (error) {
       useWorkflows.getState().addRun({
         id: crypto.randomUUID(), workflowId: workflow.id, workflowName: workflow.name,
-        startedAt, finishedAt: Date.now(), status: 'failed', results: [{ stepId: 'scheduler', title: '调度执行', host: '', output: '', error: (error as Error).message }]
+        startedAt, finishedAt: Date.now(), status: 'failed', results: [{ stepId: 'scheduler', title: '调度执行', host: '', output: '', error: (error as Error).message }],
+        logs: [...logs, { at: Date.now(), stepId: 'scheduler', message: `调度失败：${(error as Error).message}` }]
       })
     } finally { running.delete(workflow.id) }
   }

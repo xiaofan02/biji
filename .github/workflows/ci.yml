@@ -16,6 +16,27 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: moqi
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: moqi_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moqi -d moqi_ci"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://moqi:ci-only-password@localhost:5432/moqi_ci
+      JWT_SECRET: ci-only-not-for-production-1234567890
+      REGISTRATION_ENABLED: 'true'
+      REGISTRATION_CODE: ci-only-invite
+      MOQI_URL: http://localhost:8080
+      MOQI_USER: ci-admin
+      MOQI_PASS: ci-only-admin-password
+      MOQI_INVITE_CODE: ci-only-invite
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,4 +55,18 @@ jobs:
       - name: Check server types
         working-directory: server
         run: npm run typecheck
-
+      - name: Prepare isolated test server
+        working-directory: server
+        run: |
+          npm run create-admin -- "$MOQI_USER" "$MOQI_PASS"
+          nohup npm start > /tmp/moqi-ci-server.log 2>&1 &
+          for i in {1..30}; do
+            if curl --fail --silent "$MOQI_URL/api/health" > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/moqi-ci-server.log
+          exit 1
+      - name: Verify authorization and sharing
+        run: npm run smoke:server-qa
+      - name: Verify two-client collaboration
+        run: npm run smoke:collab

@@ -127,6 +127,7 @@ export interface WorkflowRunRecord {
   workflowName: string
   startedAt: number
   finishedAt: number
-  status: 'success' | 'partial' | 'failed'
+  status: 'success' | 'partial' | 'failed' | 'cancelled'
   results: Array<{ stepId: string; title: string; host: string; output: string; error?: string }>
+  logs?: Array<{ at: number; stepId: string; message: string }>
 }

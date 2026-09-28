@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type PaneContent = 'editor' | 'terminal' | 'workflow'
+export type PaneContent = 'editor' | 'terminal' | 'workflow' | 'web-ai'
 
 export interface LeafPane {
   type: 'leaf'
@@ -48,7 +48,7 @@ function twoPaneLayout(content: Exclude<PaneContent, 'editor'>): { root: PaneNod
         { type: 'leaf', id: EDITOR_ID, content: 'editor' },
         { type: 'leaf', id: secondaryId, content }
       ],
-      sizes: content === 'terminal' ? [0.56, 0.44] : [0.42, 0.58]
+      sizes: content === 'workflow' ? [0.42, 0.58] : [0.56, 0.44]
     },
     secondaryId
   }
@@ -114,30 +114,29 @@ export const usePanes = create<PanesState>((set) => ({
 
   toggleMaximize: (id) => set((s) => ({ maximizedId: s.maximizedId === id ? null : id, activeId: id })),
 
-  // 双击面板标题进入单页。编辑器/工作流会真正折叠布局；终端采用保活全屏，
-  // 避免正在使用的 SSH/Telnet 会话因 React 卸载而断线。界面上不会留下分屏，
-  // 且终端永远只有一个实例；返回资料库时可恢复笔记+终端并排。
+  // 双击面板标题进入单页。编辑器/工作流会真正折叠布局；终端和网页 AI
+  // 采用保活全屏，避免 SSH 或网页登录状态因 React 卸载而中断。
   openExclusive: (id) =>
     set((s) => {
       const leaf = findLeafById(s.root, id)
       if (!leaf) return s
-      if (leaf.content === 'terminal') return { activeId: leaf.id, maximizedId: leaf.id }
+      if (leaf.content === 'terminal' || leaf.content === 'web-ai') return { activeId: leaf.id, maximizedId: leaf.id }
       return { root: leaf, activeId: leaf.id, maximizedId: null }
     }),
 
-  // 活动栏切换采用可预测的单一布局：编辑器；编辑器+终端；编辑器+工作流。
-  // 终端可取消最大化后与笔记并排，工作流作为独立页面使用。
+  // 活动栏切换采用可预测的单一布局：编辑器；编辑器+终端；编辑器+网页 AI；
+  // 编辑器+工作流。终端和网页 AI 默认与笔记并排，工作流作为独立页面使用。
   focusOrOpen: (content) =>
     set((s) => {
       if (content === 'editor') {
-        const terminal = findLeafByContent(s.root, 'terminal')
-        if (terminal) return { activeId: EDITOR_ID, maximizedId: null }
+        const companion = findLeafByContent(s.root, 'terminal') || findLeafByContent(s.root, 'web-ai')
+        if (companion) return { activeId: EDITOR_ID, maximizedId: null }
         return { root: { type: 'leaf', id: EDITOR_ID, content: 'editor' }, activeId: EDITOR_ID, maximizedId: null }
       }
       const existing = findLeafByContent(s.root, content)
-      if (existing) return { activeId: existing.id, maximizedId: existing.id }
+      if (existing) return { activeId: existing.id, maximizedId: content === 'web-ai' ? null : existing.id }
       const { root, secondaryId } = twoPaneLayout(content)
-      return { root, activeId: secondaryId, maximizedId: secondaryId }
+      return { root, activeId: secondaryId, maximizedId: content === 'web-ai' ? null : secondaryId }
     })
 }))
 

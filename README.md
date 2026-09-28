@@ -6,19 +6,20 @@
 
 ## ✨ 特性
 
-- 📝 **Markdown 编辑 + 实时预览** - 所见即所得,支持代码高亮、表格、任务列表
-- 💻 **多语言代码编辑** - 基于 Monaco (VS Code 同款编辑器),原生支持 Python / JavaScript / TypeScript / YAML / JSON / TOML / Shell / SQL / Go / Rust / C/C++ / Java / Ruby 等几十种语言
+- 📝 **块式笔记编辑** - 以 `.bnote` 文件保存；支持标题、代码块、内嵌工作表、甘特图、Word 导入和多格式导出
+- 💻 **代码块编辑** - 支持常用语言高亮，并可将命令发送到右侧终端
 - 🤖 **AI 大模型集成**
   - 本地 [Ollama](https://ollama.com) (无需联网,完全私有)
   - 第三方代理 (OpenAI / Claude / DeepSeek / 月之暗面 Moonshot / 智谱 GLM / One-API 等使用 OpenAI 协议的服务)
   - 支持流式输出
   - 可将当前笔记内容作为上下文发送给 AI
+- 🌐 **网页 AI** - ChatGPT、Gemini、豆包、Codex 嵌入右侧分屏；使用当前电脑用户自己的网页账号，不需要 API Key
 - ⌨️ **SSH 远程终端** - 内置完整的 SSH 终端 (xterm.js + ssh2),支持密码与私钥认证
 - 📡 **Telnet 终端** - 经典 Telnet 连接,适用于路由器、交换机等设备
 - 🔍 **全文搜索** - 全局快速搜索笔记内容与文件名
 - 🔗 **双向链接** - 使用 `[[笔记标题]]` 建立知识关联并查看反向引用
 - 📑 **笔记模板** - 内置会议、变更、故障、日报模板，也可保存自定义模板
-- 📁 **本地文件存储** - 笔记以纯 .md / .py / .json 等原生格式存储,可直接用任意编辑器或网盘同步
+- 📁 **本地文件存储** - 笔记以 `.bnote` 文件存储，可导出 Markdown、PDF、Word 等格式
 - 🌓 **深色 / 浅色主题**
 - 🚀 **跨平台** - Windows / macOS / Linux
 
@@ -65,7 +66,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Actions 会自动构建 Windows / macOS / Linux 三个平台的安装包并附加到 Release。
+推送版本标签会自动构建并发布 Windows、macOS 安装包；Linux 包仅在手动触发工作流时构建。
 
 也可以在 Actions 页面手动触发 `workflow_dispatch`。
 
@@ -142,19 +143,32 @@ Actions 会自动构建 Windows / macOS / Linux 三个平台的安装包并附�
 | 保存 | `Ctrl + S` |
 | 全局搜索 | `Ctrl + P` |
 | AI 助手 | `Ctrl + I` |
+| 网页 AI（ChatGPT） | `Ctrl + Shift + G` |
 | 远程终端 | `Ctrl + T` |
-| 切换 Markdown 预览 | `Ctrl + Shift + P` |
+| 当前笔记查找 / 替换 | `Ctrl + F` / `Ctrl + H` |
+| 导入文档 | `Ctrl + Shift + I` |
 | 设置 | `Ctrl + ,` |
 | 发送 AI 消息 | `Ctrl + Enter` (在输入框中) |
+| 轻量 AI 助手 | `Ctrl + Space` |
 
 ## 📂 数据存储
 
-所有笔记存储在工作区目录(默认 `Documents/BijiNotes`),以原始 `.md` / `.py` / `.json` 等格式保存。可以:
+所有笔记存储在工作区目录（默认 `Documents/BijiNotes`），主要为 `.bnote` 文件。可以:
 - 直接用资源管理器查看 / 备份
 - 用 Git 进行版本控制
 - 用 OneDrive / 坚果云 / 同步盘 跨设备同步
 
-设置(包括 AI Key、SSH 主机)存储在系统用户配置目录下的 `biji-settings.json`。
+设置存储在系统用户配置目录下的 `biji-settings.json`。网页 AI 的登录会话保存在当前系统用户的数据目录，不会随安装包发布；ChatGPT 与 Codex 共用 OpenAI 登录，Gemini、豆包分别隔离。网页会员与 API 额度是两种不同的服务。
+
+## 网页 AI 与验收范围
+
+在“设置 → 网页 AI 中心”打开服务，页面会在主窗口右侧与笔记并排。可切换服务、后退、前进、刷新，复制回答后可使用“写入笔记”。“退出登录”会清除对应网页会话；退出 ChatGPT 或 Codex 会同时清除两者共用的 OpenAI 登录。
+
+v0.8.6 起提供嵌入式网页 AI。网站登录可能受服务方的嵌入或登录策略影响；请按 [验收清单](docs/stability-qa.md) 对实际账号逐项试用。
+
+## 工作流运行
+
+工作流支持显示步骤状态、取消手动运行和查看带时间的运行日志；最近运行记录会保存日志和设备输出。取消会停止后续命令并关闭当前连接，但正在建立的 SSH/Telnet 连接可能需要等连接超时后才结束。定时运行仍由桌面应用调度，关闭应用后不会继续执行；设备凭证只保存在本机，没有上传到协同服务器。
 
 ## 🔒 安全说明
 

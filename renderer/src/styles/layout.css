@@ -199,6 +199,67 @@
   overflow: hidden;
 }
 
+/* 嵌入式网页 AI：工具栏由 React 渲染，网页正文由主进程 WebContentsView
+   精确覆盖在 host 区域。登录会话保持隔离，同时不再弹出系统窗口。 */
+.web-ai-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+.web-ai-toolbar {
+  min-height: 42px;
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.web-ai-provider-select {
+  min-width: 118px;
+  max-width: 180px;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.web-ai-provider-select:focus { border-color: var(--accent); }
+.web-ai-nav { display: flex; align-items: center; gap: 2px; }
+.web-ai-nav .icon-btn { font-size: 17px; }
+.web-ai-note-btn {
+  margin-left: auto;
+  height: 30px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.web-ai-hint {
+  min-height: 26px;
+  padding: 5px 10px;
+  color: var(--text-tertiary);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 16px;
+}
+.web-ai-view-host {
+  flex: 1;
+  min-width: 1px;
+  min-height: 1px;
+  background: #111827;
+}
+@media (max-width: 1050px) {
+  .web-ai-hint { display: none; }
+  .web-ai-note-btn { padding: 0 7px; }
+}
+
 /* ===== 顶栏 ===== */
 .topbar {
   flex: none;

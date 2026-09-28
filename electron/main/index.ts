@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, Menu, safeStorage, globalShortcut, session, clipboard } from 'electron'
+import { app, shell, BrowserWindow, WebContentsView, ipcMain, dialog, Menu, safeStorage, globalShortcut, session, clipboard } from 'electron'
 import { join, dirname, extname, relative, isAbsolute, resolve, sep } from 'path'
 import fs from 'fs'
 import fsp from 'fs/promises'
@@ -13,12 +13,15 @@ import { SerialPort } from 'serialport'
 // 渲染层切换为 React(electron-vite),markdown 渲染交给前端 BlockNote,故移除 md:render。
 
 // 产品展示名改为“墨启 MOQI”，但继续使用旧版用户数据目录，保证升级后工作区、登录和设置不丢失。
-app.setPath('userData', join(app.getPath('appData'), '笔记 Biji'))
+// 自动化验收可显式指定隔离资料目录；正常启动不设置此变量，绝不迁移用户数据。
+const testUserData = process.env['MOQI_TEST_USER_DATA']?.trim()
+if (testUserData) fs.mkdirSync(testUserData, { recursive: true })
+app.setPath('userData', testUserData ? resolve(testUserData) : join(app.getPath('appData'), '笔记 Biji'))
 
 const store = new Store({
   name: 'biji-settings',
   defaults: {
-    workspace: join(app.getPath('documents'), 'BijiNotes'),
+    workspace: testUserData ? join(resolve(testUserData), 'BijiNotes') : join(app.getPath('documents'), 'BijiNotes'),
     theme: 'light',
     fontSize: 16,
     documentLineHeight: 1.6,
@@ -87,7 +90,8 @@ const WEB_AI_CONFIGS: Record<WebAIProvider, WebAIConfig> = {
   }
 }
 
-const webAIWindows = new Map<WebAIProvider, BrowserWindow>()
+const webAIViews = new Map<WebAIProvider, WebContentsView>()
+let activeWebAIProvider: WebAIProvider | null = null
 
 function webAIConfig(provider: string): WebAIConfig & { provider: WebAIProvider } {
   if (!(provider in WEB_AI_CONFIGS)) throw new Error('不支持的网页 AI 服务')
@@ -109,10 +113,26 @@ function isWebAINavigation(rawUrl: string, config: WebAIConfig): boolean {
   }
 }
 
-function secureWebAIPopupOptions(config: WebAIConfig): Electron.BrowserWindowConstructorOptions {
-  return {
-    autoHideMenuBar: true,
-    backgroundColor: '#111827',
+function removeWebAIViews(provider?: WebAIProvider): void {
+  const configs = provider ? [WEB_AI_CONFIGS[provider]] : Object.values(WEB_AI_CONFIGS)
+  const sessions = new Set(configs.map((config) => session.fromPartition(config.partition)))
+  for (const [key, view] of webAIViews) {
+    if (!sessions.has(view.webContents.session)) continue
+    if (mainWindow && !mainWindow.isDestroyed() && activeWebAIProvider === key) mainWindow.contentView.removeChildView(view)
+    if (!view.webContents.isDestroyed()) view.webContents.close()
+    webAIViews.delete(key)
+  }
+  if (!provider || (activeWebAIProvider && sessions.has(session.fromPartition(WEB_AI_CONFIGS[activeWebAIProvider].partition)))) {
+    activeWebAIProvider = null
+  }
+}
+
+function createWebAIView(providerName: string): WebContentsView {
+  const config = webAIConfig(providerName)
+  const existing = webAIViews.get(config.provider)
+  if (existing && !existing.webContents.isDestroyed()) return existing
+
+  const view = new WebContentsView({
     webPreferences: {
       partition: config.partition,
       nodeIntegration: false,
@@ -120,56 +140,14 @@ function secureWebAIPopupOptions(config: WebAIConfig): Electron.BrowserWindowCon
       sandbox: true,
       webSecurity: true
     }
-  }
-}
-
-function closeWebAIWindows(provider?: WebAIProvider): void {
-  const configs = provider ? [WEB_AI_CONFIGS[provider]] : Object.values(WEB_AI_CONFIGS)
-  const sessions = new Set(configs.map((config) => session.fromPartition(config.partition)))
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win !== mainWindow && !win.isDestroyed() && sessions.has(win.webContents.session)) win.destroy()
-  }
-  if (provider) {
-    const partition = WEB_AI_CONFIGS[provider].partition
-    for (const [key] of webAIWindows) {
-      if (WEB_AI_CONFIGS[key].partition === partition) webAIWindows.delete(key)
-    }
-  } else {
-    webAIWindows.clear()
-  }
-}
-
-function createOrShowWebAI(providerName: string, copyText = ''): BrowserWindow {
-  const config = webAIConfig(providerName)
-  if (copyText.trim()) clipboard.writeText(copyText.trim())
-  const existing = webAIWindows.get(config.provider)
-  if (existing && !existing.isDestroyed()) {
-    if (existing.isMinimized()) existing.restore()
-    existing.show()
-    existing.focus()
-    return existing
-  }
-
-  const savedBounds = store.get(`webAIBounds.${config.provider}`) as Partial<Electron.Rectangle> | undefined
-  const win = new BrowserWindow({
-    ...secureWebAIPopupOptions(config),
-    width: savedBounds?.width || 480,
-    height: savedBounds?.height || 760,
-    x: savedBounds?.x,
-    y: savedBounds?.y,
-    minWidth: 390,
-    minHeight: 560,
-    show: false,
-    title: `${config.label} · 墨启 MOQI 网页 AI`,
-    icon: join(app.getAppPath(), 'build', 'icon.png')
   })
-  webAIWindows.set(config.provider, win)
+  webAIViews.set(config.provider, view)
 
-  const userAgent = win.webContents.getUserAgent().replace(/\sElectron\/\S+/i, '').replace(/\smoqi\/\S+/i, '')
-  win.webContents.setUserAgent(userAgent)
+  const userAgent = view.webContents.getUserAgent().replace(/\sElectron\/\S+/i, '').replace(/\smoqi\/\S+/i, '')
+  view.webContents.setUserAgent(userAgent)
   // 仅允许网页把回答复制到系统剪贴板；摄像头、麦克风、定位和文件系统等权限全部拒绝。
-  win.webContents.session.setPermissionCheckHandler((_webContents, permission) => permission === 'clipboard-sanitized-write')
-  win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+  view.webContents.session.setPermissionCheckHandler((_webContents, permission) => permission === 'clipboard-sanitized-write')
+  view.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === 'clipboard-sanitized-write')
   })
 
@@ -178,25 +156,51 @@ function createOrShowWebAI(providerName: string, copyText = ''): BrowserWindow {
     event.preventDefault()
     if (/^https?:/i.test(targetUrl)) void shell.openExternal(targetUrl)
   }
-  win.webContents.on('will-navigate', guardNavigation)
-  win.webContents.on('will-redirect', guardNavigation)
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  view.webContents.on('will-navigate', guardNavigation)
+  view.webContents.on('will-redirect', guardNavigation)
+  view.webContents.setWindowOpenHandler(({ url }) => {
     if (isWebAINavigation(url, config)) {
-      return { action: 'allow', overrideBrowserWindowOptions: secureWebAIPopupOptions(config) }
+      // OAuth/站内链接也在当前嵌入视图中完成，避免再次弹出独立系统窗口。
+      void view.webContents.loadURL(url)
+      return { action: 'deny' }
     }
     if (/^https?:/i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
 
-  win.once('ready-to-show', () => win.show())
-  win.on('close', () => {
-    if (!win.isDestroyed()) store.set(`webAIBounds.${config.provider}`, win.getBounds())
-  })
-  win.on('closed', () => {
-    if (webAIWindows.get(config.provider) === win) webAIWindows.delete(config.provider)
-  })
-  void win.loadURL(config.url)
-  return win
+  void view.webContents.loadURL(config.url)
+  return view
+}
+
+function sanitizeWebAIBounds(bounds: Partial<Electron.Rectangle>): Electron.Rectangle {
+  const windowBounds = mainWindow?.getContentBounds() || { width: 0, height: 0 }
+  const x = Math.max(0, Math.round(Number(bounds.x) || 0))
+  const y = Math.max(0, Math.round(Number(bounds.y) || 0))
+  const width = Math.max(1, Math.min(Math.round(Number(bounds.width) || 1), Math.max(1, windowBounds.width - x)))
+  const height = Math.max(1, Math.min(Math.round(Number(bounds.height) || 1), Math.max(1, windowBounds.height - y)))
+  return { x, y, width, height }
+}
+
+function showWebAIView(providerName: string, bounds: Partial<Electron.Rectangle>, copyText = ''): WebContentsView {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('主窗口尚未就绪')
+  const config = webAIConfig(providerName)
+  if (copyText.trim()) clipboard.writeText(copyText.trim())
+  const next = createWebAIView(config.provider)
+  if (activeWebAIProvider && activeWebAIProvider !== config.provider) {
+    const active = webAIViews.get(activeWebAIProvider)
+    if (active) mainWindow.contentView.removeChildView(active)
+  }
+  if (activeWebAIProvider !== config.provider) mainWindow.contentView.addChildView(next)
+  next.setBounds(sanitizeWebAIBounds(bounds))
+  activeWebAIProvider = config.provider
+  return next
+}
+
+function hideWebAIView(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !activeWebAIProvider) return
+  const view = webAIViews.get(activeWebAIProvider)
+  if (view) mainWindow.contentView.removeChildView(view)
+  activeWebAIProvider = null
 }
 
 app.on('second-instance', () => {
@@ -400,7 +404,7 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     if (revealTimer) clearTimeout(revealTimer)
-    closeWebAIWindows()
+    removeWebAIViews()
     mainWindow = null
     closeAllSessions()
   })
@@ -996,17 +1000,43 @@ ipcMain.handle('ai:test', (_e, provider: AIProvider) => ai.test(provider))
 registerRemoteHandlers(ipcMain)
 
 // ============ IPC: System ============
-ipcMain.handle('web-ai:open', (_e, provider: string, copyText?: string) => {
+ipcMain.handle('web-ai:show', (_e, provider: string, bounds: Partial<Electron.Rectangle>, copyText?: string) => {
   const text = typeof copyText === 'string' ? copyText.trim() : ''
   const config = webAIConfig(provider)
-  createOrShowWebAI(config.provider, text)
-  return { copied: Boolean(text) }
+  const view = showWebAIView(config.provider, bounds, text)
+  return {
+    copied: Boolean(text),
+    provider: config.provider,
+    canGoBack: view.webContents.navigationHistory.canGoBack(),
+    canGoForward: view.webContents.navigationHistory.canGoForward()
+  }
+})
+ipcMain.handle('web-ai:set-bounds', (_e, bounds: Partial<Electron.Rectangle>) => {
+  if (!mainWindow || mainWindow.isDestroyed() || !activeWebAIProvider) return false
+  const view = webAIViews.get(activeWebAIProvider)
+  if (!view || view.webContents.isDestroyed()) return false
+  view.setBounds(sanitizeWebAIBounds(bounds))
+  return true
+})
+ipcMain.handle('web-ai:hide', () => {
+  hideWebAIView()
+  return true
+})
+ipcMain.handle('web-ai:navigate', (_e, action: 'back' | 'forward' | 'reload' | 'home') => {
+  if (!activeWebAIProvider) return false
+  const view = webAIViews.get(activeWebAIProvider)
+  if (!view || view.webContents.isDestroyed()) return false
+  if (action === 'back' && view.webContents.navigationHistory.canGoBack()) view.webContents.navigationHistory.goBack()
+  else if (action === 'forward' && view.webContents.navigationHistory.canGoForward()) view.webContents.navigationHistory.goForward()
+  else if (action === 'reload') view.webContents.reload()
+  else if (action === 'home') void view.webContents.loadURL(WEB_AI_CONFIGS[activeWebAIProvider].url)
+  return true
 })
 ipcMain.handle('web-ai:read-clipboard', () => clipboard.readText())
 ipcMain.handle('web-ai:clear-session', async (_e, provider?: string) => {
   const configs = provider ? [webAIConfig(provider)] : Object.values(WEB_AI_CONFIGS)
-  if (provider) closeWebAIWindows(webAIConfig(provider).provider)
-  else closeWebAIWindows()
+  if (provider) removeWebAIViews(webAIConfig(provider).provider)
+  else removeWebAIViews()
   const partitions = [...new Set(configs.map((config) => config.partition))]
   for (const partition of partitions) {
     const webSession = session.fromPartition(partition)

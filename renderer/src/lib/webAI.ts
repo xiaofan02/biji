@@ -1,5 +1,8 @@
 import { ipc } from '@/lib/ipc'
 import { useTabs } from '@/store/useTabs'
+import { usePanes } from '@/store/usePanes'
+import { useWebAI } from '@/store/useWebAI'
+import { useUI } from '@/store/useUI'
 import { toast } from '@/store/useToast'
 import { confirm } from '@/store/useConfirm'
 
@@ -30,15 +33,14 @@ export function captureWebAISelection(): string {
   return window.getSelection()?.toString().trim() || ''
 }
 
-export async function openWebAI(provider: WebAIProvider, selection = captureWebAISelection()): Promise<void> {
+export function openWebAI(provider: WebAIProvider, selection = captureWebAISelection()): void {
   const label = webAIProviderLabel(provider)
-  try {
-    const text = selection.trim()
-    await ipc.webAI.open(provider, text)
-    toast(text ? `已复制选中内容并打开 ${label}` : `已打开 ${label}`, 'success')
-  } catch (error) {
-    toast(`${label} 打开失败：${(error as Error).message}`, 'error')
-  }
+  const text = selection.trim()
+  useWebAI.getState().open(provider, text)
+  const ui = useUI.getState()
+  if (ui.activityView === 'terminal' || ui.activityView === 'workflow') ui.setActivityView('library')
+  usePanes.getState().focusOrOpen('web-ai')
+  toast(text ? `已复制选中内容，并在右侧打开 ${label}` : `已在右侧打开 ${label}`, 'success')
 }
 
 export async function appendWebAIClipboardToNote(): Promise<void> {
@@ -67,8 +69,8 @@ export async function clearWebAILogin(provider?: WebAIProvider): Promise<void> {
   const ok = await confirm({
     title: `清除${label}登录状态`,
     message: openAILinked
-      ? 'ChatGPT 与 Codex 共用 OpenAI 登录。清除后两个窗口都会退出登录；笔记和应用账号不会受到影响。'
-      : `这会关闭 ${label} 窗口，并清除它在当前电脑上的 Cookie 和缓存。笔记和应用账号不会受到影响。`,
+      ? 'ChatGPT 与 Codex 共用 OpenAI 登录。清除后两个页面都会退出登录；笔记和应用账号不会受到影响。'
+      : `这会关闭 ${label} 页面，并清除它在当前电脑上的 Cookie 和缓存。笔记和应用账号不会受到影响。`,
     confirmText: '清除并退出登录',
     danger: true
   })
@@ -76,6 +78,9 @@ export async function clearWebAILogin(provider?: WebAIProvider): Promise<void> {
 
   try {
     await ipc.webAI.clearSession(provider)
+    // 清理原生视图后，当前面板仍在挂载；强制在遮挡层关闭后重新创建登录页。
+    const state = useWebAI.getState()
+    state.open(state.provider)
     toast(`${label}登录状态已清除`, 'success')
   } catch (error) {
     toast(`清除失败：${(error as Error).message}`, 'error')

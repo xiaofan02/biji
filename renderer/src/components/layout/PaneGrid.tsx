@@ -5,18 +5,21 @@ import { Tabs } from '@/components/layout/Tabs'
 import { DocArea } from '@/components/editor/DocArea'
 import { TerminalPanel } from '@/components/terminal/TerminalPanel'
 import { WorkflowPanel } from '@/components/workflow/WorkflowPanel'
+import { WebAIPanel } from '@/components/webai/WebAIPanel'
 import { Icon, type IconName } from '@/components/common/Icon'
 
 const CONTENT_META: Record<PaneContent, { label: string; icon: IconName }> = {
   editor: { label: '文档', icon: 'file-text' },
   terminal: { label: '远程终端', icon: 'terminal' },
-  workflow: { label: '工作流', icon: 'workflow' }
+  workflow: { label: '工作流', icon: 'workflow' },
+  'web-ai': { label: '网页 AI', icon: 'sparkles' }
 }
 
 function PaneContentView({ content }: { content: PaneContent }) {
   if (content === 'editor') return <DocArea />
   if (content === 'terminal') return <TerminalPanel />
-  return <WorkflowPanel />
+  if (content === 'workflow') return <WorkflowPanel />
+  return <WebAIPanel />
 }
 
 function PaneHeader({ pane }: { pane: LeafPane }) {

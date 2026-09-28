@@ -30,6 +30,9 @@ export const hocuspocus = Server.configure({
         [data.documentName, tokenUser.id]
       )
       const row = access.rows[0]
+      // 必须在连接层禁止只读用户提交 Yjs 更新。仅在存盘钩子拒绝保存，
+      // 仍会把未授权编辑广播到同一房间，随后可能被可编辑用户的保存带入数据库。
+      if (row) data.connection.readOnly = row.role === 'viewer'
       const user: AuthUser = row
         ? {
             id: tokenUser.id,

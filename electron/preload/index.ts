@@ -112,8 +112,21 @@ const api = {
     }
   },
   webAI: {
-    open: (provider: 'chatgpt' | 'codex' | 'gemini' | 'doubao', copyText?: string) =>
-      ipcRenderer.invoke('web-ai:open', provider, copyText) as Promise<{ copied: boolean }>,
+    show: (
+      provider: 'chatgpt' | 'codex' | 'gemini' | 'doubao',
+      bounds: { x: number; y: number; width: number; height: number },
+      copyText?: string
+    ) => ipcRenderer.invoke('web-ai:show', provider, bounds, copyText) as Promise<{
+      copied: boolean
+      provider: 'chatgpt' | 'codex' | 'gemini' | 'doubao'
+      canGoBack: boolean
+      canGoForward: boolean
+    }>,
+    setBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.invoke('web-ai:set-bounds', bounds) as Promise<boolean>,
+    hide: () => ipcRenderer.invoke('web-ai:hide') as Promise<boolean>,
+    navigate: (action: 'back' | 'forward' | 'reload' | 'home') =>
+      ipcRenderer.invoke('web-ai:navigate', action) as Promise<boolean>,
     readClipboard: () => ipcRenderer.invoke('web-ai:read-clipboard') as Promise<string>,
     clearSession: (provider?: 'chatgpt' | 'codex' | 'gemini' | 'doubao') =>
       ipcRenderer.invoke('web-ai:clear-session', provider) as Promise<boolean>
