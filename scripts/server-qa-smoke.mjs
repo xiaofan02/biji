@@ -3,6 +3,9 @@ import { HocuspocusProvider } from '@hocuspocus/provider'
 import WebSocket from 'ws'
 import * as Y from 'yjs'
 
+// Hocuspocus 在构造内部 websocket provider 时仍读取全局 WebSocket；Node 20 没有该全局对象。
+globalThis.WebSocket = WebSocket
+
 const base = String(process.env.MOQI_URL || '').replace(/\/+$/, '')
 const adminUser = process.env.MOQI_USER
 const adminPass = process.env.MOQI_PASS
